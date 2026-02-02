@@ -1,14 +1,17 @@
-
 import React from 'react';
+import { User } from '../types';
 
 interface TopBarProps {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
   title: string;
+  user: User | null;
+  onLogout: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ isDarkMode, toggleDarkMode, title }) => {
+export const TopBar: React.FC<TopBarProps> = ({ isDarkMode, toggleDarkMode, title, user, onLogout }) => {
   const [isNotificationsOpen, setIsNotificationsOpen] = React.useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
   const [notifications] = React.useState([
     { id: 1, title: 'Novo Pedido #1023', time: '5 min atrás', type: 'info', read: false },
     { id: 2, title: 'Estoque Crítico: Monitor 24"', time: '1 hora atrás', type: 'warning', read: false },
@@ -96,16 +99,60 @@ export const TopBar: React.FC<TopBarProps> = ({ isDarkMode, toggleDarkMode, titl
 
         <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
 
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
-            <p className="text-xs font-bold text-slate-800 dark:text-white">Ricardo Souza</p>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Gestor de Operações</p>
-          </div>
-          <img
-            src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop"
-            alt="User"
-            className="size-9 rounded-full border border-slate-200 dark:border-slate-800 object-cover"
-          />
+        <div className="relative">
+          <button
+            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            className="flex items-center gap-3 p-1 rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 transition-all active:scale-95 group"
+          >
+            <div className="text-right hidden sm:block">
+              <p className="text-xs font-black text-slate-800 dark:text-white group-hover:text-primary transition-colors">{user?.name || 'Ricardo Souza'}</p>
+              <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest leading-tight">{user?.role === 'admin' ? 'Gestor de Operações' : 'Operador CD'}</p>
+            </div>
+            <div className="relative">
+              <img
+                src={user?.avatar || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop"}
+                alt="User"
+                className="size-9 rounded-full border-2 border-slate-200 dark:border-slate-800 object-cover group-hover:border-primary transition-colors"
+              />
+              <div className="absolute -bottom-0.5 -right-0.5 size-3 bg-green-500 rounded-full border-2 border-white dark:border-[#111922]"></div>
+            </div>
+          </button>
+
+          {isUserMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setIsUserMenuOpen(false)}
+              ></div>
+              <div className="absolute top-full right-0 mt-3 w-56 bg-white dark:bg-slate-900 rounded-[1.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Logado como</p>
+                  <p className="text-sm font-black text-slate-800 dark:text-white truncate">{user?.email || 'ricardo.souza@nortetech.com'}</p>
+                </div>
+                <div className="p-2">
+                  <button className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all group">
+                    <span className="material-symbols-outlined text-lg group-hover:text-primary transition-colors">person</span>
+                    Meu Perfil
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all group">
+                    <span className="material-symbols-outlined text-lg group-hover:text-primary transition-colors">settings</span>
+                    Configurações
+                  </button>
+                  <div className="my-2 border-t border-slate-100 dark:border-slate-800"></div>
+                  <button
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-black text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-all group"
+                  >
+                    <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">logout</span>
+                    Encerrar Sessão
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>

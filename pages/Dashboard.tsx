@@ -119,9 +119,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ inventory, activities }) =
 
         <div className="lg:col-span-4 space-y-8">
           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center gap-4 mb-8">
-              <div>
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
                 <h3 className="text-lg font-black tracking-tight text-slate-800 dark:text-white">Estoque Crítico</h3>
+                {criticalItems.length > 0 && (
+                  <span className="flex items-center justify-center bg-red-500 text-white text-[12px] font-black px-4 py-1.5 rounded-full animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.4)] border-2 border-white dark:border-slate-800 translate-y-[-2px]">
+                    {criticalItems.length} ITENS
+                  </span>
+                )}
               </div>
             </div>
             <div className="space-y-4">

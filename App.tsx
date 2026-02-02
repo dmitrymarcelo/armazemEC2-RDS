@@ -796,7 +796,13 @@ const App: React.FC = () => {
     <div className={`flex w-screen h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
       <Sidebar activeModule={activeModule} onModuleChange={setActiveModule} user={user} />
       <div className="flex-1 flex flex-col min-w-0 h-full">
-        <TopBar isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} title={getPageTitle(activeModule)} />
+        <TopBar
+          isDarkMode={isDarkMode}
+          toggleDarkMode={toggleDarkMode}
+          title={getPageTitle(activeModule)}
+          user={user}
+          onLogout={logout}
+        />
         <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-6 lg:p-10 relative">
           {notification && (
             <div className={`fixed top-20 right-8 z-50 animate-in slide-in-from-right px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 border ${notification.type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' :
