@@ -505,6 +505,60 @@ const App: React.FC = () => {
     showNotification(`${isEdit ? 'Registro atualizado' : 'Cadastro realizado'} com sucesso`, 'success');
   };
 
+  const handleImportMasterRecords = async (type: 'item' | 'vendor' | 'vehicle', data: any[]) => {
+    let table = '';
+    let processedData = [];
+
+    if (type === 'item') {
+      table = 'inventory';
+      processedData = data.map(d => ({
+        sku: d.sku,
+        name: d.name,
+        category: d.category,
+        unit: d.unit,
+        image_url: d.imageUrl,
+        quantity: d.quantity,
+        status: d.status,
+        location: d.location,
+        min_qty: d.minQty,
+        max_qty: d.maxQty
+      }));
+    } else if (type === 'vendor') {
+      table = 'vendors';
+      processedData = data.map(d => ({
+        id: d.id,
+        name: d.name,
+        cnpj: d.cnpj,
+        contact: d.contact,
+        status: d.status
+      }));
+    } else if (type === 'vehicle') {
+      table = 'vehicles';
+      processedData = data.map(d => ({
+        plate: d.plate,
+        model: d.model,
+        driver: d.driver,
+        type: d.type,
+        status: d.status,
+        last_maintenance: d.lastMaintenance
+      }));
+    }
+
+    const { error } = await supabase.from(table).insert(processedData);
+
+    if (!error) {
+      if (type === 'item') setInventory(prev => [...prev, ...data]);
+      else if (type === 'vendor') setVendors(prev => [...prev, ...data]);
+      else if (type === 'vehicle') setVehicles(prev => [...prev, ...data]);
+
+      showNotification(`${data.length} registros importados com sucesso!`, 'success');
+      addActivity('alerta', 'Importação XLSX', `${data.length} registros de ${type} adicionados`);
+    } else {
+      showNotification('Erro ao importar registros. Verifique duplicidade de SKUs/Placas.', 'error');
+      console.error('Import error:', error);
+    }
+  };
+
   const handleRemoveMasterRecord = async (type: 'item' | 'vendor' | 'vehicle', id: string) => {
     if (type === 'item') {
       const { error } = await supabase.from('inventory').delete().eq('sku', id);
@@ -650,6 +704,7 @@ const App: React.FC = () => {
               vehicles={vehicles}
               onAddRecord={handleAddMasterRecord}
               onRemoveRecord={handleRemoveMasterRecord}
+              onImportRecords={handleImportMasterRecords}
             />
           )}
           {activeModule === 'relatorios' && <Reports />}

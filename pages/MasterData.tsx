@@ -10,9 +10,10 @@ interface MasterDataProps {
   vehicles: Vehicle[];
   onAddRecord: (type: 'item' | 'vendor' | 'vehicle', data: any, isEdit: boolean) => void;
   onRemoveRecord?: (type: 'item' | 'vendor' | 'vehicle', id: string) => void;
+  onImportRecords: (type: 'item' | 'vendor' | 'vehicle', data: any[]) => void;
 }
 
-export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehicles, onAddRecord, onRemoveRecord }) => {
+export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehicles, onAddRecord, onRemoveRecord, onImportRecords }) => {
   const [activeTab, setActiveTab] = useState<Tab>('itens');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -66,6 +67,63 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Template');
     XLSX.writeFile(wb, fileName);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws);
+
+      if (data.length === 0) return;
+
+      let mappedData: any[] = [];
+      const type = activeTab === 'itens' ? 'item' : activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
+
+      if (activeTab === 'itens') {
+        mappedData = data.map((row: any) => ({
+          sku: row['SKU'],
+          name: row['Nome'],
+          unit: row['Unidade de Medida'] || 'UN',
+          category: row['Categoria'],
+          quantity: Number(row['Quantidade']) || 0,
+          minQty: Number(row['MinQty']) || 10,
+          maxQty: Number(row['MaxQty']) || 1000,
+          imageUrl: row['URL'] || 'https://images.unsplash.com/photo-1553413077-190dd305871c?w=400&q=80',
+          status: 'disponivel',
+          batch: 'N/A',
+          expiry: 'N/A',
+          location: 'DOCA-01'
+        }));
+      } else if (activeTab === 'fornecedores') {
+        mappedData = data.map((row: any) => ({
+          name: row['NOME'],
+          cnpj: row['CNPJ'],
+          contact: row['CONTATO'],
+          status: row['STATUS'] || 'Ativo',
+          id: `VEN-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+        }));
+      } else if (activeTab === 'frota') {
+        mappedData = data.map((row: any) => ({
+          plate: row['PLACA'],
+          model: row['MODELO'],
+          driver: row['MOTORISTA'],
+          type: row['TIPO'] || 'Truck',
+          status: 'Disponível',
+          lastMaintenance: new Date().toLocaleDateString('pt-BR')
+        }));
+      }
+
+      onImportRecords(type, mappedData);
+      e.target.value = ''; // Reset input
+    };
+    reader.readAsBinaryString(file);
   };
 
   const ActionButtons = ({ onEdit, onDelete }: { onEdit: () => void, onDelete: () => void }) => (
@@ -125,6 +183,17 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
             </svg>
             Baixar Modelo (.xlsx)
           </button>
+
+          <label className="px-6 py-4 bg-emerald-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-2 cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Importar (.xlsx)
+            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleImport} />
+          </label>
+
           <button
             onClick={() => handleOpenModal()}
             className="px-8 py-4 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-primary/25 hover:bg-blue-600 transition-all active:scale-95 flex items-center gap-2"
