@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-02-07T18:26:16.688Z",
+  "scale": "large",
+  "seed": 20260207,
+  "backupPath": "C:\\Users\\Administrador\\Downloads\\logiwms-pro---gestão-inteligente-de-armazém\\api-backend\\data-backups\\backup-2026-02-07T18-24-11-059Z",
+  "counts": {
+    "warehouses": 2,
+    "users": 401,
+    "vendors": 9000,
+    "vehicles": 5000,
+    "inventory": 60000,
+    "purchase_orders": 42000,
+    "movements": 240000,
+    "material_requests": 90000,
+    "notifications": 85000
+  },
+  "loginSeed": {
+    "admin": {
+      "email": "admin@nortetech.com",
+      "password": "admin"
+    },
+    "sampleOperator": {
+      "email": "operador1@nortetech.com",
+      "password": "senha123"
+    }
+  }
+}

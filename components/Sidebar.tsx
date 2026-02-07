@@ -183,7 +183,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
         </nav>
 
         {/* Settings Section */}
-        <div className="mt-auto bg-slate-50/50 dark:bg-slate-800/10 p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-800 transition-all duration-500">
+        {user.modules?.includes('configuracoes') && (
+          <div className="mt-auto bg-slate-50/50 dark:bg-slate-800/10 p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-800 transition-all duration-500">
           <button
             onClick={() => onModuleChange('configuracoes')}
             className={`w-full flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-4'} ${activeModule === 'configuracoes'
@@ -199,7 +200,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
               </span>
             </div>
           </button>
-        </div>
+          </div>
+        )}
       </aside>
     </>
   );

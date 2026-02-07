@@ -42,7 +42,7 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
   };
 
   const handleSyncAPI = () => {
-    const savedToken = localStorage.getItem('fleet_api_token') || '42eee9fe816a9a49c7edcc909eba561db2ea23dc'; // Default to user's provided token for convenience
+    const savedToken = localStorage.getItem('fleet_api_token') || '';
     const token = window.prompt('Informe o Token da Fleet API:', savedToken);
     if (token && onSyncAPI) {
       localStorage.setItem('fleet_api_token', token);

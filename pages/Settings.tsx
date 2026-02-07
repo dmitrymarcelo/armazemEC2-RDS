@@ -51,7 +51,7 @@ export const Settings: React.FC<SettingsProps> = ({ users, warehouses, onAddUser
           status: newUser.status || 'Ativo',
           lastAccess: 'Nunca',
           avatar: `https://ui-avatars.com/api/?name=${newUser.name}&background=random`,
-          password: newUser.password || '123456',
+          password: newUser.password || '',
           modules: newUser.modules || [],
           allowedWarehouses: newUser.allowedWarehouses || ['ARMZ28']
         });

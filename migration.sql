@@ -1,344 +1,454 @@
--- ========================================
--- MIGRATION COMPLETA E PERFEITA - LogiWMS-Pro
--- Database: armazem
--- Autor: Sistema Automatizado
--- Data: 2026-02-07
--- ========================================
--- Este script cria TODAS as 12 tabelas necessárias para o LogiWMS-Pro
--- Execute este script no banco de dados 'armazem' no EC2
--- Comando: psql -U dmitry -d armazem -f migration.sql
+-- Migration oficial LogiWMS-Pro para PostgreSQL (AWS/RDS)
+-- Objetivo: tipagem forte (TIMESTAMPTZ/JSONB), indices e compatibilidade com dados legados.
+-- Execucao:
+--   psql -U <usuario> -d armazem -f migration.sql
 
--- Conectar ao banco
 \c armazem
 
--- Extensões necessárias
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-\echo '🚀 Iniciando criação das tabelas...'
-\echo ''
+-- Conversao segura de texto para timestamptz.
+CREATE OR REPLACE FUNCTION safe_to_timestamptz(value TEXT)
+RETURNS TIMESTAMPTZ
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  parsed TIMESTAMPTZ;
+  normalized TEXT;
+BEGIN
+  IF value IS NULL THEN
+    RETURN NULL;
+  END IF;
 
--- ========================================
--- TABELAS PRINCIPAIS (12 tabelas)
--- ========================================
+  normalized := btrim(value);
+  IF normalized = '' OR lower(normalized) IN ('n/a', 'null', 'undefined') THEN
+    RETURN NULL;
+  END IF;
 
--- 1. Tabela de Armazéns (PRIMEIRA - outras tabelas dependem dela)
-\echo '📦 Criando tabela: warehouses'
+  BEGIN
+    parsed := normalized::timestamptz;
+    RETURN parsed;
+  EXCEPTION WHEN others THEN
+    NULL;
+  END;
+
+  BEGIN
+    parsed := to_timestamp(normalized, 'DD/MM/YYYY HH24:MI:SS');
+    RETURN parsed;
+  EXCEPTION WHEN others THEN
+    NULL;
+  END;
+
+  BEGIN
+    parsed := to_timestamp(normalized, 'DD/MM/YYYY, HH24:MI:SS');
+    RETURN parsed;
+  EXCEPTION WHEN others THEN
+    NULL;
+  END;
+
+  BEGIN
+    parsed := to_timestamp(normalized, 'YYYY-MM-DD HH24:MI:SS');
+    RETURN parsed;
+  EXCEPTION WHEN others THEN
+    NULL;
+  END;
+
+  BEGIN
+    parsed := to_timestamp(normalized, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    RETURN parsed;
+  EXCEPTION WHEN others THEN
+    NULL;
+  END;
+
+  RETURN NULL;
+END;
+$$;
+
+-- Conversao segura de texto para JSONB.
+CREATE OR REPLACE FUNCTION safe_to_jsonb(value TEXT, fallback JSONB DEFAULT '[]'::JSONB)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF value IS NULL OR btrim(value) = '' THEN
+    RETURN fallback;
+  END IF;
+
+  RETURN value::jsonb;
+EXCEPTION WHEN others THEN
+  RETURN fallback;
+END;
+$$;
+
+-- Estrutura principal
 CREATE TABLE IF NOT EXISTS warehouses (
-    id VARCHAR(50) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    location VARCHAR(255),
-    manager_name VARCHAR(255),
-    manager_email VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id VARCHAR(50) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  location VARCHAR(255),
+  manager_name VARCHAR(255),
+  manager_email VARCHAR(255),
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Tabela de Usuários
-\echo '👤 Criando tabela: users'
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    role TEXT NOT NULL,
-    status TEXT DEFAULT 'Ativo',
-    last_access TEXT,
-    avatar TEXT,
-    password TEXT NOT NULL,
-    modules TEXT, -- Armazenado como JSON string
-    allowed_warehouses TEXT, -- Armazenado como JSON string
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT DEFAULT 'Ativo',
+  last_access TIMESTAMPTZ,
+  avatar TEXT,
+  password TEXT NOT NULL,
+  modules JSONB NOT NULL DEFAULT '[]'::JSONB,
+  allowed_warehouses JSONB NOT NULL DEFAULT '[]'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Tabela de Centros de Custo
-\echo '💰 Criando tabela: cost_centers'
 CREATE TABLE IF NOT EXISTS cost_centers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    manager TEXT,
-    budget DECIMAL(15, 2) DEFAULT 0,
-    status TEXT DEFAULT 'Ativo',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  manager TEXT,
+  budget DECIMAL(15, 2) DEFAULT 0,
+  status TEXT DEFAULT 'Ativo',
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Tabela de Fornecedores
-\echo '🏢 Criando tabela: vendors'
 CREATE TABLE IF NOT EXISTS vendors (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    cnpj TEXT,
-    category TEXT,
-    contact TEXT,
-    email TEXT,
-    status TEXT DEFAULT 'Ativo',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  cnpj TEXT,
+  category TEXT,
+  contact TEXT,
+  email TEXT,
+  status TEXT DEFAULT 'Ativo',
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Tabela de Veículos
-\echo '🚚 Criando tabela: vehicles'
 CREATE TABLE IF NOT EXISTS vehicles (
-    plate VARCHAR(20) PRIMARY KEY,
-    model TEXT,
-    type TEXT,
-    status TEXT DEFAULT 'Disponível',
-    last_maintenance TEXT,
-    cost_center TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  plate VARCHAR(20) PRIMARY KEY,
+  model TEXT,
+  type TEXT,
+  status TEXT DEFAULT 'Disponivel',
+  last_maintenance TIMESTAMPTZ,
+  cost_center TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. Tabela de Inventário (Estoque) - DEPENDE de warehouses
-\echo '📊 Criando tabela: inventory'
 CREATE TABLE IF NOT EXISTS inventory (
-    sku VARCHAR(50) PRIMARY KEY,
-    name TEXT NOT NULL,
-    location TEXT,
-    batch TEXT,
-    expiry TEXT,
-    quantity INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'disponivel',
-    image_url TEXT,
-    category TEXT,
-    min_qty INTEGER DEFAULT 0,
-    max_qty INTEGER DEFAULT 0,
-    unit TEXT DEFAULT 'UN',
-    lead_time INTEGER DEFAULT 7,
-    safety_stock INTEGER DEFAULT 5,
-    abc_category TEXT,
-    last_counted_at TEXT,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  sku VARCHAR(50) PRIMARY KEY,
+  name TEXT NOT NULL,
+  location TEXT,
+  batch TEXT,
+  expiry TEXT,
+  quantity INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'disponivel',
+  image_url TEXT,
+  category TEXT,
+  min_qty INTEGER DEFAULT 0,
+  max_qty INTEGER DEFAULT 0,
+  unit TEXT DEFAULT 'UN',
+  lead_time INTEGER DEFAULT 7,
+  safety_stock INTEGER DEFAULT 5,
+  abc_category TEXT,
+  last_counted_at TIMESTAMPTZ,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. Tabela de Movimentações - DEPENDE de inventory e warehouses
-\echo '🔄 Criando tabela: movements'
 CREATE TABLE IF NOT EXISTS movements (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    sku VARCHAR(50) REFERENCES inventory(sku),
-    product_name TEXT,
-    type TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    "user" TEXT,
-    location TEXT,
-    reason TEXT,
-    order_id TEXT,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sku VARCHAR(50) REFERENCES inventory(sku),
+  product_name TEXT,
+  type TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  "user" TEXT,
+  location TEXT,
+  reason TEXT,
+  order_id TEXT,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id)
 );
 
--- 8. Tabela de Pedidos de Compra - DEPENDE de warehouses
-\echo '🛒 Criando tabela: purchase_orders'
 CREATE TABLE IF NOT EXISTS purchase_orders (
-    id TEXT PRIMARY KEY,
-    vendor TEXT,
-    request_date TEXT,
-    status TEXT DEFAULT 'requisicao',
-    priority TEXT DEFAULT 'normal',
-    total DECIMAL(15, 2) DEFAULT 0,
-    requester TEXT,
-    items TEXT,
-    quotes TEXT,
-    selected_quote_id TEXT,
-    sent_to_vendor_at TEXT,
-    received_at TEXT,
-    quotes_added_at TEXT,
-    approved_at TEXT,
-    rejected_at TEXT,
-    vendor_order_number TEXT,
-    approval_history TEXT,
-    plate TEXT,
-    cost_center TEXT,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  vendor TEXT,
+  request_date TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT DEFAULT 'requisicao',
+  priority TEXT DEFAULT 'normal',
+  total DECIMAL(15, 2) DEFAULT 0,
+  requester TEXT,
+  items JSONB NOT NULL DEFAULT '[]'::JSONB,
+  quotes JSONB NOT NULL DEFAULT '[]'::JSONB,
+  selected_quote_id TEXT,
+  sent_to_vendor_at TIMESTAMPTZ,
+  received_at TIMESTAMPTZ,
+  quotes_added_at TIMESTAMPTZ,
+  approved_at TIMESTAMPTZ,
+  rejected_at TIMESTAMPTZ,
+  vendor_order_number TEXT,
+  approval_history JSONB NOT NULL DEFAULT '[]'::JSONB,
+  plate TEXT,
+  cost_center TEXT,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. Tabela de Requisições de Materiais - DEPENDE de inventory e warehouses
-\echo '📋 Criando tabela: material_requests'
 CREATE TABLE IF NOT EXISTS material_requests (
-    id TEXT PRIMARY KEY,
-    sku VARCHAR(50) REFERENCES inventory(sku),
-    name TEXT,
-    qty INTEGER NOT NULL,
-    plate TEXT,
-    dept TEXT,
-    priority TEXT,
-    status TEXT DEFAULT 'aprovacao',
-    cost_center TEXT,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  sku VARCHAR(50) REFERENCES inventory(sku),
+  name TEXT,
+  qty INTEGER NOT NULL,
+  plate TEXT,
+  dept TEXT,
+  priority TEXT,
+  status TEXT DEFAULT 'aprovacao',
+  cost_center TEXT,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 10. Lotes de Inventário Cíclico - DEPENDE de warehouses
-\echo '🔍 Criando tabela: cyclic_batches'
 CREATE TABLE IF NOT EXISTS cyclic_batches (
-    id TEXT PRIMARY KEY,
-    status TEXT DEFAULT 'aberto',
-    scheduled_date TEXT,
-    completed_at TEXT,
-    accuracy_rate DECIMAL(5, 2),
-    total_items INTEGER DEFAULT 0,
-    divergent_items INTEGER DEFAULT 0,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  status TEXT DEFAULT 'aberto',
+  scheduled_date TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  accuracy_rate DECIMAL(5, 2),
+  total_items INTEGER DEFAULT 0,
+  divergent_items INTEGER DEFAULT 0,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. Contagens do Inventário Cíclico - DEPENDE de cyclic_batches, inventory e warehouses
-\echo '✅ Criando tabela: cyclic_counts'
 CREATE TABLE IF NOT EXISTS cyclic_counts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    batch_id TEXT REFERENCES cyclic_batches(id),
-    sku VARCHAR(50) REFERENCES inventory(sku),
-    expected_qty INTEGER NOT NULL,
-    counted_qty INTEGER,
-    status TEXT DEFAULT 'pendente',
-    notes TEXT,
-    counted_at TEXT,
-    warehouse_id VARCHAR(50) REFERENCES warehouses(id)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id TEXT REFERENCES cyclic_batches(id),
+  sku VARCHAR(50) REFERENCES inventory(sku),
+  expected_qty INTEGER NOT NULL,
+  counted_qty INTEGER,
+  status TEXT DEFAULT 'pendente',
+  notes TEXT,
+  counted_at TIMESTAMPTZ,
+  warehouse_id VARCHAR(50) REFERENCES warehouses(id)
 );
 
--- 12. Tabela de Notificações
-\echo '🔔 Criando tabela: notifications'
 CREATE TABLE IF NOT EXISTS notifications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    type TEXT DEFAULT 'info',
-    read BOOLEAN DEFAULT false,
-    user_id TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT DEFAULT 'info',
+  read BOOLEAN DEFAULT false,
+  user_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-\echo ''
-\echo '✅ Todas as 12 tabelas criadas com sucesso!'
-\echo ''
+-- Conversao de ambientes legados (colunas antigas em TEXT)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'users' AND column_name = 'last_access' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE users ALTER COLUMN last_access TYPE TIMESTAMPTZ USING safe_to_timestamptz(last_access);
+  END IF;
 
--- ========================================
--- DADOS INICIAIS (SEED)
--- ========================================
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'users' AND column_name = 'modules' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE users ALTER COLUMN modules TYPE JSONB USING safe_to_jsonb(modules, '[]'::JSONB);
+  END IF;
 
-\echo '🌱 Inserindo dados iniciais...'
-\echo ''
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'users' AND column_name = 'allowed_warehouses' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE users ALTER COLUMN allowed_warehouses TYPE JSONB USING safe_to_jsonb(allowed_warehouses, '[]'::JSONB);
+  END IF;
 
--- Inserir Armazéns
-\echo '  📦 Armazéns: ARMZ28, ARMZ33'
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'inventory' AND column_name = 'last_counted_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE inventory ALTER COLUMN last_counted_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(last_counted_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'vehicles' AND column_name = 'last_maintenance' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE vehicles ALTER COLUMN last_maintenance TYPE TIMESTAMPTZ USING safe_to_timestamptz(last_maintenance);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'request_date' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN request_date TYPE TIMESTAMPTZ USING safe_to_timestamptz(request_date);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'sent_to_vendor_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN sent_to_vendor_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(sent_to_vendor_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'received_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN received_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(received_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'quotes_added_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN quotes_added_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(quotes_added_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'approved_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN approved_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(approved_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'rejected_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN rejected_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(rejected_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'items' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN items TYPE JSONB USING safe_to_jsonb(items, '[]'::JSONB);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'quotes' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN quotes TYPE JSONB USING safe_to_jsonb(quotes, '[]'::JSONB);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'purchase_orders' AND column_name = 'approval_history' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE purchase_orders ALTER COLUMN approval_history TYPE JSONB USING safe_to_jsonb(approval_history, '[]'::JSONB);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cyclic_batches' AND column_name = 'scheduled_date' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE cyclic_batches ALTER COLUMN scheduled_date TYPE TIMESTAMPTZ USING safe_to_timestamptz(scheduled_date);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cyclic_batches' AND column_name = 'completed_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE cyclic_batches ALTER COLUMN completed_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(completed_at);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'cyclic_counts' AND column_name = 'counted_at' AND data_type IN ('text', 'character varying')
+  ) THEN
+    ALTER TABLE cyclic_counts ALTER COLUMN counted_at TYPE TIMESTAMPTZ USING safe_to_timestamptz(counted_at);
+  END IF;
+END
+$$;
+
+-- Defaults e NOT NULL para JSONB critico
+ALTER TABLE users ALTER COLUMN modules SET DEFAULT '[]'::JSONB;
+ALTER TABLE users ALTER COLUMN allowed_warehouses SET DEFAULT '[]'::JSONB;
+UPDATE users SET modules = '[]'::JSONB WHERE modules IS NULL;
+UPDATE users SET allowed_warehouses = '[]'::JSONB WHERE allowed_warehouses IS NULL;
+ALTER TABLE users ALTER COLUMN modules SET NOT NULL;
+ALTER TABLE users ALTER COLUMN allowed_warehouses SET NOT NULL;
+
+ALTER TABLE purchase_orders ALTER COLUMN items SET DEFAULT '[]'::JSONB;
+ALTER TABLE purchase_orders ALTER COLUMN quotes SET DEFAULT '[]'::JSONB;
+ALTER TABLE purchase_orders ALTER COLUMN approval_history SET DEFAULT '[]'::JSONB;
+UPDATE purchase_orders SET items = '[]'::JSONB WHERE items IS NULL;
+UPDATE purchase_orders SET quotes = '[]'::JSONB WHERE quotes IS NULL;
+UPDATE purchase_orders SET approval_history = '[]'::JSONB WHERE approval_history IS NULL;
+ALTER TABLE purchase_orders ALTER COLUMN items SET NOT NULL;
+ALTER TABLE purchase_orders ALTER COLUMN quotes SET NOT NULL;
+ALTER TABLE purchase_orders ALTER COLUMN approval_history SET NOT NULL;
+
+-- Indices
+CREATE INDEX IF NOT EXISTS idx_users_role_status ON users(role, status);
+CREATE INDEX IF NOT EXISTS idx_users_last_access ON users(last_access DESC);
+CREATE INDEX IF NOT EXISTS idx_users_modules_gin ON users USING GIN (modules);
+CREATE INDEX IF NOT EXISTS idx_users_allowed_warehouses_gin ON users USING GIN (allowed_warehouses);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_warehouse ON inventory(warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(status);
+CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory(category);
+
+CREATE INDEX IF NOT EXISTS idx_movements_warehouse_timestamp ON movements(warehouse_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_movements_sku_timestamp ON movements(sku, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_po_warehouse_request_date ON purchase_orders(warehouse_id, request_date DESC);
+CREATE INDEX IF NOT EXISTS idx_po_status_priority ON purchase_orders(status, priority);
+CREATE INDEX IF NOT EXISTS idx_po_items_gin ON purchase_orders USING GIN (items);
+CREATE INDEX IF NOT EXISTS idx_po_quotes_gin ON purchase_orders USING GIN (quotes);
+CREATE INDEX IF NOT EXISTS idx_po_approval_history_gin ON purchase_orders USING GIN (approval_history);
+
+CREATE INDEX IF NOT EXISTS idx_requests_warehouse_created ON material_requests(warehouse_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_requests_status_priority ON material_requests(status, priority);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read_created ON notifications(user_id, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cyclic_batches_warehouse_created ON cyclic_batches(warehouse_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cyclic_counts_batch ON cyclic_counts(batch_id);
+
+-- Seed principal
 INSERT INTO warehouses (id, name, description, location, manager_name, is_active)
-VALUES 
-('ARMZ28', 'Armazém Principal', 'Operações gerais de armazenamento e distribuição', 'Manaus - AM', 'Administrador', true),
-('ARMZ33', 'Conferência de Carga em Tempo Real', 'Recebimento, conferência e validação de carga', 'Manaus - AM', 'Administrador', true)
+VALUES
+  ('ARMZ28', 'Armazem Principal', 'Operacoes gerais de armazenamento e distribuicao', 'Manaus - AM', 'Administrador', true),
+  ('ARMZ33', 'Conferencia de Carga em Tempo Real', 'Recebimento, conferencia e validacao de carga', 'Manaus - AM', 'Administrador', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Inserir Usuário Administrador
-\echo '  👤 Usuário: admin@nortetech.com'
 INSERT INTO users (id, name, email, role, status, password, modules, allowed_warehouses)
-VALUES (
-    '1', 
-    'Administrador', 
-    'admin@nortetech.com', 
-    'admin', 
-    'Ativo', 
-    'admin', 
-    '["dashboard","recebimento","movimentacoes","estoque","expedicao","inventario_ciclico","compras","cadastro","relatorios","configuracoes"]', 
-    '["ARMZ28","ARMZ33"]'
-) ON CONFLICT (email) DO NOTHING;
-
--- Inserir Usuário Gerente
-\echo '  👤 Usuário: MATIAS@G.COM'
-INSERT INTO users (id, name, email, role, status, password, modules, allowed_warehouses)
-VALUES (
+VALUES
+  (
+    '1',
+    'Administrador',
+    'admin@nortetech.com',
+    'admin',
+    'Ativo',
+    'pbkdf2$310000$c69ffaeaeaf017b7f94270ab3a61d55b$8d5b4fd072c9044b957eb432bdf26f03ff1b50a7859ca7b370b0f896356f356a',
+    '["dashboard","recebimento","movimentacoes","estoque","expedicao","inventario_ciclico","compras","cadastro","relatorios","configuracoes"]'::jsonb,
+    '["ARMZ28","ARMZ33"]'::jsonb
+  ),
+  (
     'ocv3aoy40',
     'MATIAS',
     'MATIAS@G.COM',
     'manager',
     'Ativo',
-    '1234',
-    '["dashboard","recebimento","movimentacoes","estoque","expedicao","compras","inventario_ciclico","cadastro","relatorios","configuracoes"]',
-    '["ARMZ33"]'
-) ON CONFLICT (email) DO NOTHING;
+    'pbkdf2$310000$899714a53cee2b0abc6ff8370582e339$77f07c5a4c32bc93fbc7187efe33ffe0df35591f518ff54da92e7e1be1b997f6',
+    '["dashboard","recebimento","movimentacoes","estoque","expedicao","compras","inventario_ciclico","cadastro","relatorios","configuracoes"]'::jsonb,
+    '["ARMZ33"]'::jsonb
+  )
+ON CONFLICT (email) DO NOTHING;
 
--- Inserir Centros de Custo
-\echo '  💰 Centros de Custo: CC-LOG, CC-OPS, CC-MAN'
-INSERT INTO cost_centers (code, name, manager, budget, status) VALUES
-('CC-LOG', 'Logística', 'Administrador', 500000.00, 'Ativo'),
-('CC-OPS', 'Operações', 'MATIAS', 300000.00, 'Ativo'),
-('CC-MAN', 'Manutenção', 'Administrador', 150000.00, 'Ativo')
+INSERT INTO cost_centers (code, name, manager, budget, status)
+VALUES
+  ('CC-LOG', 'Logistica', 'Administrador', 500000.00, 'Ativo'),
+  ('CC-OPS', 'Operacoes', 'MATIAS', 300000.00, 'Ativo'),
+  ('CC-MAN', 'Manutencao', 'Administrador', 150000.00, 'Ativo')
 ON CONFLICT (code) DO NOTHING;
 
-\echo ''
-\echo '✅ Dados iniciais inseridos com sucesso!'
-\echo ''
-
--- ========================================
--- VERIFICAÇÃO E RELATÓRIO
--- ========================================
-
-\echo '📊 RELATÓRIO DE VERIFICAÇÃO'
-\echo '================================'
-\echo ''
-
--- Listar todas as tabelas
-\echo '📋 Tabelas criadas:'
-\dt
-
-\echo ''
-\echo '📊 Contagem de registros por tabela:'
-\echo ''
-
-SELECT 
-    'warehouses' as tabela, 
-    COUNT(*) as registros,
-    CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END as status
-FROM warehouses
-UNION ALL
-SELECT 'users', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM users
-UNION ALL
-SELECT 'cost_centers', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM cost_centers
-UNION ALL
-SELECT 'vendors', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM vendors
-UNION ALL
-SELECT 'vehicles', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM vehicles
-UNION ALL
-SELECT 'inventory', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM inventory
-UNION ALL
-SELECT 'movements', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM movements
-UNION ALL
-SELECT 'purchase_orders', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM purchase_orders
-UNION ALL
-SELECT 'material_requests', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM material_requests
-UNION ALL
-SELECT 'cyclic_batches', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM cyclic_batches
-UNION ALL
-SELECT 'cyclic_counts', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM cyclic_counts
-UNION ALL
-SELECT 'notifications', COUNT(*), CASE WHEN COUNT(*) > 0 THEN '✅' ELSE '⚠️' END FROM notifications
-ORDER BY tabela;
-
--- Verificar usuários criados
-\echo ''
-\echo '👥 Usuários cadastrados:'
-SELECT id, name, email, role FROM users;
-
--- Verificar armazéns criados
-\echo ''
-\echo '📦 Armazéns cadastrados:'
-SELECT id, name, location FROM warehouses;
-
--- Mensagem final
-\echo ''
-\echo '================================'
-\echo '✅ MIGRATION CONCLUÍDA COM SUCESSO!'
-\echo '================================'
-\echo ''
-\echo '📊 Resumo:'
-\echo '  - 12 tabelas criadas'
-\echo '  - 2 armazéns (ARMZ28, ARMZ33)'
-\echo '  - 2 usuários (admin, MATIAS)'
-\echo '  - 3 centros de custo'
-\echo ''
-\echo '🔐 Credenciais de acesso:'
-\echo '  Admin: admin@nortetech.com / admin'
-\echo '  Gerente: MATIAS@G.COM / 1234'
-\echo ''
-\echo '🌐 Próximo passo: Iniciar o backend'
-\echo '  cd api-backend'
-\echo '  pm2 restart logiwms-api'
-\echo ''
+\echo 'Migration concluida com sucesso.'
+\echo 'Teste rapido: SELECT count(*) FROM users;'

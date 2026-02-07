@@ -1,18 +1,18 @@
 [
-    {
-        "id": "ARMZ28",
-        "name": "Armazém Principal",
-        "description": "Operações gerais de armazenamento e distribuição",
-        "location": "Manaus - AM",
-        "manager_name": "Administrador",
-        "is_active": true
-    },
-    {
-        "id": "ARMZ33",
-        "name": "Conferência de Carga em Tempo Real",
-        "description": "Recebimento, conferência e validação de carga",
-        "location": "Manaus - AM",
-        "manager_name": "Administrador",
-        "is_active": true
-    }
+  {
+    "id": "ARMZ28",
+    "name": "Armazém Principal",
+    "description": "Operações gerais de armazenamento e distribuição",
+    "location": "Manaus - AM",
+    "manager_name": "Administrador",
+    "is_active": true
+  },
+  {
+    "id": "ARMZ33",
+    "name": "Conferência de Carga em Tempo Real",
+    "description": "Recebimento, conferência e validação de carga",
+    "location": "Manaus - AM",
+    "manager_name": "Administrador",
+    "is_active": true
+  }
 ]

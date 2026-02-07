@@ -1,0 +1,64 @@
+[
+  {
+    "id": "1",
+    "name": "Administrador",
+    "email": "admin@nortetech.com",
+    "role": "admin",
+    "status": "Ativo",
+    "avatar": "https://ui-avatars.com/api/?name=Admin&background=0D8ABC&color=fff",
+    "password": "pbkdf2$310000$c69ffaeaeaf017b7f94270ab3a61d55b$8d5b4fd072c9044b957eb432bdf26f03ff1b50a7859ca7b370b0f896356f356a",
+    "modules": [
+      "dashboard",
+      "recebimento",
+      "movimentacoes",
+      "estoque",
+      "expedicao",
+      "compras",
+      "gestao_compras",
+      "cadastro",
+      "relatorios",
+      "configuracoes"
+    ],
+    "allowed_warehouses": [
+      "ARMZ28",
+      "ARMZ33"
+    ]
+  },
+  {
+    "id": "ocv3aoy40",
+    "name": "MATIAS",
+    "email": "MATIAS@G.COM",
+    "role": "manager",
+    "status": "Ativo",
+    "password": "pbkdf2$310000$899714a53cee2b0abc6ff8370582e339$77f07c5a4c32bc93fbc7187efe33ffe0df35591f518ff54da92e7e1be1b997f6",
+    "modules": [
+      "dashboard",
+      "recebimento",
+      "movimentacoes",
+      "estoque",
+      "expedicao",
+      "compras",
+      "inventario_ciclico",
+      "cadastro",
+      "relatorios",
+      "configuracoes"
+    ],
+    "allowed_warehouses": [
+      "ARMZ33"
+    ]
+  },
+  {
+    "id": "test-user-1770432830329",
+    "name": "Usuário de Teste Segurança",
+    "email": "teste.seguranca@nortetech.com",
+    "role": "operator",
+    "status": "Ativo",
+    "password": "pbkdf2$310000$31b68edb3078be95987337fa0a194d87$0bcc42bff2f414c38ee7df427c1c38826b5404acdd810730f7a719b8133a759f",
+    "modules": [
+      "dashboard"
+    ],
+    "allowed_warehouses": [
+      "ARMZ28"
+    ]
+  }
+]

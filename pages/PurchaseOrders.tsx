@@ -1,10 +1,17 @@
-
+﻿
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseOrder, Vendor, InventoryItem, Quote, User, PO_STATUS_LABELS, CyclicBatch, CyclicCount, Vehicle } from '../types';
+import { PaginationBar } from '../components/PaginationBar';
 
 interface PurchaseOrdersProps {
   user: User;
+  activeWarehouse: string;
   orders: PurchaseOrder[];
+  currentPage: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  isPageLoading: boolean;
+  onPageChange: (page: number) => void;
   vendors: Vendor[];
   inventory: InventoryItem[];
   vehicles?: Vehicle[];
@@ -264,7 +271,13 @@ const normalize = (val: string) => (val || '').replace(/\D/g, '');
 
 export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   user,
+  activeWarehouse,
   orders,
+  currentPage,
+  pageSize,
+  hasNextPage,
+  isPageLoading,
+  onPageChange,
   vendors,
   inventory,
   vehicles = [],
@@ -419,7 +432,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
       requester: 'Ricardo Souza (Manual)',
       plate: plate.toUpperCase(),
       costCenter: costCenter,
-      warehouseId: user.allowedWarehouses[0] || 'default', // NOVO: Armazém padrão do usuário
+      warehouseId: activeWarehouse,
       items: itemsList.map(item => ({ ...item, price: 0 }))
     };
 
@@ -663,6 +676,16 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
 
 
 
+      <PaginationBar
+        currentPage={currentPage}
+        currentCount={orders.length}
+        pageSize={pageSize}
+        hasNextPage={hasNextPage}
+        isLoading={isPageLoading}
+        itemLabel="pedidos"
+        onPageChange={onPageChange}
+      />
+
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -770,8 +793,8 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={5} className="px-8 py-20 text-center text-slate-400 font-black uppercase text-xs tracking-widest">
-                    Nenhum pedido de compra registrado.
+                  <td colSpan={6} className="px-8 py-20 text-center text-slate-400 font-black uppercase text-xs tracking-widest">
+                    {isPageLoading ? 'Carregando pedidos...' : 'Nenhum pedido de compra registrado.'}
                   </td>
                 </tr>
               )}
@@ -1699,3 +1722,4 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     </div>
   );
 };
+

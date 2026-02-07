@@ -1,6 +1,7 @@
-
+﻿
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { InventoryItem, Vehicle } from '../types';
+import { PaginationBar } from '../components/PaginationBar';
 
 type RequestStatus = 'aprovacao' | 'separacao' | 'entregue';
 
@@ -42,11 +43,29 @@ interface ExpeditionProps {
   onRequestCreate: (data: MaterialRequest) => void;
   onRequestUpdate: (id: string, status: RequestStatus) => void;
   activeWarehouse: string;
+  currentPage: number;
+  pageSize: number;
+  hasNextPage: boolean;
+  isPageLoading: boolean;
+  onPageChange: (page: number) => void;
 }
 
 const INITIAL_ORDERS: Order[] = [];
 
-export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = [], onProcessPicking, requests, onRequestCreate, onRequestUpdate, activeWarehouse }) => {
+export const Expedition: React.FC<ExpeditionProps> = ({
+  inventory,
+  vehicles = [],
+  onProcessPicking,
+  requests,
+  onRequestCreate,
+  onRequestUpdate,
+  activeWarehouse,
+  currentPage,
+  pageSize,
+  hasNextPage,
+  isPageLoading,
+  onPageChange,
+}) => {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
 
@@ -174,17 +193,28 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
       </div>
 
       {/* Seção de Workflow Interno */}
-      {requests.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 px-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 3h12" />
-              <path d="M6 8h12" />
-              <path d="m6 13 2 2 4-4" />
-              <path d="M6 18h12" />
-            </svg>
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Requisições em Fluxo Interno</h3>
-          </div>
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 px-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 3h12" />
+            <path d="M6 8h12" />
+            <path d="m6 13 2 2 4-4" />
+            <path d="M6 18h12" />
+          </svg>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Requisicoes em Fluxo Interno</h3>
+        </div>
+
+        <PaginationBar
+          currentPage={currentPage}
+          currentCount={requests.length}
+          pageSize={pageSize}
+          hasNextPage={hasNextPage}
+          isLoading={isPageLoading}
+          itemLabel="solicitacoes"
+          onPageChange={onPageChange}
+        />
+
+        {requests.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {requests.map((req) => (
               <div key={req.id} className={`bg-white dark:bg-slate-900 rounded-[2rem] border-2 ${req.status === 'entregue' ? 'border-emerald-100 opacity-60' : 'border-slate-100'} p-6 shadow-sm transition-all`}>
@@ -195,7 +225,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                       <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${req.priority === 'urgente' ? 'bg-red-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                         }`}>{req.priority}</span>
                     </div>
-                    <p className="text-[10px] font-black text-primary uppercase tracking-wider">{req.dept} • PLACA: {req.plate}</p>
+                    <p className="text-[10px] font-black text-primary uppercase tracking-wider">{req.dept} - PLACA: {req.plate}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-slate-400 uppercase leading-none">{req.timestamp}</p>
@@ -204,7 +234,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
 
                 <div className="mb-6">
                   <p className="text-sm font-black text-slate-700 dark:text-slate-200 truncate">{req.name}</p>
-                  <p className="text-xs font-bold text-slate-400 mt-1">{req.qty} un • {req.sku}</p>
+                  <p className="text-xs font-bold text-slate-400 mt-1">{req.qty} un - {req.sku}</p>
                 </div>
 
                 {/* Workflow Stepper */}
@@ -240,7 +270,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                             </>
                           )}
                         </svg>
-                        {req.status === 'aprovacao' ? 'Aprovar e Enviar p/ Separação' : 'Confirmar Entrega e Baixar Estoque'}
+                        {req.status === 'aprovacao' ? 'Aprovar e Enviar p/ Separacao' : 'Confirmar Entrega e Baixar Estoque'}
                       </button>
                     ) : (
                       <div className="w-full py-3 bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
@@ -256,8 +286,12 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-2xl px-6 py-16 text-center text-slate-400 text-xs font-black uppercase tracking-widest">
+            {isPageLoading ? 'Carregando solicitacoes...' : 'Nenhuma solicitacao registrada neste armazem.'}
+          </div>
+        )}
+      </div>
 
       {/* Ordens de Saída Padrão */}
       <div className="space-y-4">
@@ -300,7 +334,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                         {order.priority}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tighter">{order.customer} • Transp: {order.carrier}</p>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tighter">{order.customer} - Transp: {order.carrier}</p>
                   </div>
                 </div>
 
@@ -379,7 +413,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Fluxo Interno CD Manaus</p>
               </div>
               <button onClick={() => setIsRequestModalOpen(false)} className="size-10 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-800 dark:text-white hover:text-red-500 transition-all font-black text-xl">
-                ✕
+                ×
               </button>
             </div>
 
@@ -441,7 +475,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                               key={v.plate}
                               type="button"
                               onClick={() => {
-                                console.log('🚗 Veículo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
+                                console.log('Veiculo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
                                 setReqPlate(v.plate);
                                 setReqCostCenter(v.costCenter || '');
                                 setIsPlateSearchOpen(false);
@@ -458,7 +492,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
                               </div>
                               <div>
                                 <p className="text-xs font-black text-slate-800 dark:text-white uppercase">{v.plate}</p>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase">{v.model} • {v.costCenter}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">{v.model} - {v.costCenter}</p>
                               </div>
                             </button>
                           ))}
@@ -533,3 +567,4 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = []
     </div >
   );
 };
+

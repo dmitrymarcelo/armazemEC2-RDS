@@ -1,0 +1,137 @@
+{
+  "startedAt": "2026-02-07T18:26:41.913Z",
+  "finishedAt": "2026-02-07T18:30:27.410Z",
+  "baseUrl": "http://127.0.0.1:3201",
+  "seed": 1770488801898,
+  "durationMultiplier": 1,
+  "totals": {
+    "requests": 506,
+    "success": 353,
+    "failed": 153
+  },
+  "scenarios": [
+    {
+      "name": "login_burst",
+      "concurrency": 70,
+      "durationMs": 45024,
+      "totalRequests": 133,
+      "success": 103,
+      "failed": 30,
+      "successRate": 77.44,
+      "throughputRps": 2.95,
+      "latencyMs": {
+        "min": 501.89,
+        "p50": 14559.93,
+        "p95": 33394.64,
+        "p99": 35708.2,
+        "max": 36223.66
+      },
+      "avgResponseBytes": 591,
+      "statusCodes": {
+        "200": 103
+      },
+      "errorSamples": {
+        "fetch failed": 30
+      }
+    },
+    {
+      "name": "read_inventory_limited",
+      "concurrency": 120,
+      "durationMs": 56813,
+      "totalRequests": 212,
+      "success": 161,
+      "failed": 51,
+      "successRate": 75.94,
+      "throughputRps": 3.73,
+      "latencyMs": {
+        "min": 511.36,
+        "p50": 17420.16,
+        "p95": 45949.84,
+        "p99": 48592.88,
+        "max": 49348.48
+      },
+      "avgResponseBytes": 65503,
+      "statusCodes": {
+        "200": 161
+      },
+      "errorSamples": {
+        "fetch failed": 51
+      }
+    },
+    {
+      "name": "read_inventory_full_payload",
+      "concurrency": 16,
+      "durationMs": 23455,
+      "totalRequests": 45,
+      "success": 34,
+      "failed": 11,
+      "successRate": 75.56,
+      "throughputRps": 1.92,
+      "latencyMs": {
+        "min": 672.92,
+        "p50": 6208.61,
+        "p95": 12696.5,
+        "p99": 15064.19,
+        "max": 15064.19
+      },
+      "avgResponseBytes": 19763594,
+      "statusCodes": {
+        "200": 34
+      },
+      "errorSamples": {
+        "fetch failed": 11
+      }
+    },
+    {
+      "name": "write_material_requests",
+      "concurrency": 55,
+      "durationMs": 50398,
+      "totalRequests": 81,
+      "success": 55,
+      "failed": 26,
+      "successRate": 67.9,
+      "throughputRps": 1.61,
+      "latencyMs": {
+        "min": 716.95,
+        "p50": 25270.34,
+        "p95": 47141.59,
+        "p99": 50398.39,
+        "max": 50398.39
+      },
+      "avgResponseBytes": 239.2,
+      "statusCodes": {
+        "200": 55
+      },
+      "errorSamples": {
+        "fetch failed": 26
+      }
+    },
+    {
+      "name": "mixed_flow_login_read_write",
+      "concurrency": 24,
+      "durationMs": 47940,
+      "totalRequests": 35,
+      "success": 0,
+      "failed": 35,
+      "successRate": 0,
+      "throughputRps": 0.73,
+      "latencyMs": {
+        "min": 11256.7,
+        "p50": 29155.22,
+        "p95": 46821.84,
+        "p99": 47945.98,
+        "max": 47945.98
+      },
+      "avgResponseBytes": 0,
+      "statusCodes": {},
+      "errorSamples": {
+        "fetch failed": 30,
+        "terminated": 5
+      }
+    }
+  ],
+  "notes": [
+    "Teste executado em modo contingency-json (sem PostgreSQL).",
+    "Os cenarios sao closed-loop; throughput depende de latencia observada."
+  ]
+}

@@ -1,0 +1,59 @@
+[
+  {
+    "id": "AUTO-1770419462795-785",
+    "vendor": "A definir via cotações",
+    "request_date": "06/02/2026",
+    "status": "requisicao",
+    "priority": "urgente",
+    "total": 0,
+    "requester": "Norte Tech AI (Estoque Crítico)",
+    "items": "[{\"sku\":\"ACE-10\",\"name\":\"Óleo Lubrificante 15W40\",\"qty\":42,\"price\":0}]",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "AUTO-1770434876068-570",
+    "vendor": "A definir via cotações",
+    "request_date": "06/02/2026",
+    "status": "requisicao",
+    "priority": "urgente",
+    "total": 0,
+    "requester": "Norte Tech AI (Estoque Crítico)",
+    "items": "[{\"sku\":\"PA-001\",\"name\":\"Óleo Lubrificante 15W40\",\"qty\":42,\"price\":0}]",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "AUTO-1770434876181-760",
+    "vendor": "A definir via cotações",
+    "request_date": "06/02/2026",
+    "status": "requisicao",
+    "priority": "urgente",
+    "total": 0,
+    "requester": "Norte Tech AI (Estoque Crítico)",
+    "items": "[{\"sku\":\"ACE-10\",\"name\":\"Óleo Lubrificante 15W40\",\"qty\":42,\"price\":0}]",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "AUTO-1770434876181-760",
+    "vendor": "A definir via cotações",
+    "request_date": "06/02/2026",
+    "status": "requisicao",
+    "priority": "urgente",
+    "total": 0,
+    "requester": "Norte Tech AI (Estoque Crítico)",
+    "items": "[{\"sku\":\"ACE-10\",\"name\":\"Óleo Lubrificante 15W40\",\"qty\":42,\"price\":0}]",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "PO-2026-4443",
+    "vendor": "A definir via cotações",
+    "status": "requisicao",
+    "priority": "normal",
+    "total": 0,
+    "requester": "Ricardo Souza (Manual)",
+    "items": "[{\"sku\":\"F-502\",\"name\":\"Filtro de Óleo Diesel\",\"qty\":2,\"price\":0}]",
+    "plate": "",
+    "cost_center": "",
+    "request_date": "06/02/2026, 23:36:30",
+    "warehouse_id": "ARMZ28"
+  }
+]

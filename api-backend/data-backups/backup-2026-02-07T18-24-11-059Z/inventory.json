@@ -1,0 +1,49 @@
+[
+  {
+    "sku": "PA-001",
+    "name": "Óleo Lubrificante 15W40",
+    "location": "EXP-01",
+    "batch": "VAL-112",
+    "expiry": "2027-01-01",
+    "quantity": 8,
+    "status": "divergente",
+    "category": "Lubrificantes",
+    "abc_category": "A",
+    "unit": "GL",
+    "min_qty": 15,
+    "max_qty": 50,
+    "warehouse_id": "ARMZ28",
+    "lead_time": 7,
+    "safety_stock": 5
+  },
+  {
+    "sku": "F-502",
+    "name": "Filtro de Óleo Diesel",
+    "location": "B-02-05",
+    "batch": "B-9923",
+    "expiry": "2025-06-15",
+    "quantity": 120,
+    "status": "Em Estoque",
+    "category": "Manutenção",
+    "abc_category": "B",
+    "unit": "UN",
+    "min_qty": 30,
+    "max_qty": 500,
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "sku": "ACE-10",
+    "name": "Óleo Lubrificante 15W40",
+    "location": "EXP-01",
+    "batch": "VAL-112",
+    "expiry": "2027-01-01",
+    "quantity": 8,
+    "status": "Estoque Crítico",
+    "category": "Lubrificantes",
+    "abc_category": "A",
+    "unit": "GL",
+    "min_qty": 15,
+    "max_qty": 50,
+    "warehouse_id": "ARMZ28"
+  }
+]

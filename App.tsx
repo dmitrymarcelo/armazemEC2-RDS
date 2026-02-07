@@ -1,23 +1,28 @@
-
-import React, { useState, useEffect } from 'react';
+﻿
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WarehouseSelector } from './components/WarehouseSelector';
-import { Dashboard } from './pages/Dashboard';
-import { Receiving } from './pages/Receiving';
-import { Movements } from './pages/Movements';
-import { Inventory } from './pages/Inventory';
-import { Expedition, MaterialRequest } from './pages/Expedition';
-type RequestStatus = 'aprovacao' | 'separacao' | 'entregue'; // Re-defining locally for simplicity or import if exported
-
-import { CyclicInventory } from './pages/CyclicInventory';
-import { PurchaseOrders } from './pages/PurchaseOrders';
-import { MasterData } from './pages/MasterData';
-import { Reports } from './pages/Reports';
-import { Settings } from './pages/Settings';
+import type { MaterialRequest } from './pages/Expedition';
+type RequestStatus = 'aprovacao' | 'separacao' | 'entregue';
 import { Module, InventoryItem, Activity, Movement, Vendor, Vehicle, PurchaseOrder, Quote, ApprovalRecord, User, AppNotification, CyclicBatch, CyclicCount, Warehouse } from './types';
 import { LoginPage } from './components/LoginPage';
-import { api } from './api-client';
+import { api, AUTH_TOKEN_KEY } from './api-client';
+
+const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
+const Receiving = lazy(() => import('./pages/Receiving').then((module) => ({ default: module.Receiving })));
+const Movements = lazy(() => import('./pages/Movements').then((module) => ({ default: module.Movements })));
+const Inventory = lazy(() => import('./pages/Inventory').then((module) => ({ default: module.Inventory })));
+const Expedition = lazy(() => import('./pages/Expedition').then((module) => ({ default: module.Expedition })));
+const CyclicInventory = lazy(() =>
+  import('./pages/CyclicInventory').then((module) => ({ default: module.CyclicInventory }))
+);
+const PurchaseOrders = lazy(() =>
+  import('./pages/PurchaseOrders').then((module) => ({ default: module.PurchaseOrders }))
+);
+const MasterData = lazy(() => import('./pages/MasterData').then((module) => ({ default: module.MasterData })));
+const Reports = lazy(() => import('./pages/Reports').then((module) => ({ default: module.Reports })));
+const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
 
 
 export const App: React.FC = () => {
@@ -27,6 +32,7 @@ export const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -42,7 +48,254 @@ export const App: React.FC = () => {
   const [activeWarehouse, setActiveWarehouse] = useState<string>('ARMZ28');
   const [userWarehouses, setUserWarehouses] = useState<string[]>(['ARMZ28', 'ARMZ33']); // Default for admin
   const [isLoading, setIsLoading] = useState(true);
-  const [materialRequests, setMaterialRequests] = useState<any[]>([]); // Using any for now to avoid extensive type updates in App.tsx imports yet
+  const [materialRequests, setMaterialRequests] = useState<MaterialRequest[]>([]);
+  const [isPurchaseOrdersFullyLoaded, setIsPurchaseOrdersFullyLoaded] = useState(false);
+  const [isMovementsFullyLoaded, setIsMovementsFullyLoaded] = useState(false);
+  const [isMaterialRequestsFullyLoaded, setIsMaterialRequestsFullyLoaded] = useState(false);
+  const [isDeferredModuleLoading, setIsDeferredModuleLoading] = useState(false);
+  const [movementsPage, setMovementsPage] = useState(1);
+  const [purchaseOrdersPage, setPurchaseOrdersPage] = useState(1);
+  const [materialRequestsPage, setMaterialRequestsPage] = useState(1);
+  const [pagedMovements, setPagedMovements] = useState<Movement[]>([]);
+  const [pagedPurchaseOrders, setPagedPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [pagedMaterialRequests, setPagedMaterialRequests] = useState<MaterialRequest[]>([]);
+  const [hasMoreMovements, setHasMoreMovements] = useState(false);
+  const [hasMorePurchaseOrders, setHasMorePurchaseOrders] = useState(false);
+  const [hasMoreMaterialRequests, setHasMoreMaterialRequests] = useState(false);
+  const [isMovementsPageLoading, setIsMovementsPageLoading] = useState(false);
+  const [isPurchaseOrdersPageLoading, setIsPurchaseOrdersPageLoading] = useState(false);
+  const [isMaterialRequestsPageLoading, setIsMaterialRequestsPageLoading] = useState(false);
+
+  const fullLoadInFlight = useRef<Set<string>>(new Set());
+  const pageFetchSequence = useRef({
+    movements: 0,
+    purchaseOrders: 0,
+    materialRequests: 0
+  });
+
+  const INITIAL_PURCHASE_ORDERS_LIMIT = 1200;
+  const INITIAL_MOVEMENTS_LIMIT = 1200;
+  const INITIAL_MATERIAL_REQUESTS_LIMIT = 1200;
+  const MOVEMENTS_PAGE_SIZE = 120;
+  const PURCHASE_ORDERS_PAGE_SIZE = 60;
+  const MATERIAL_REQUESTS_PAGE_SIZE = 60;
+
+  const mapPurchaseOrders = (rows: any[]): PurchaseOrder[] => rows.map((po: any) => ({
+    id: po.id,
+    vendor: po.vendor,
+    requestDate: po.request_date,
+    status: po.status,
+    priority: po.priority,
+    total: po.total,
+    requester: po.requester,
+    items: po.items,
+    quotes: po.quotes,
+    selectedQuoteId: po.selected_quote_id,
+    sentToVendorAt: po.sent_to_vendor_at,
+    receivedAt: po.received_at,
+    quotesAddedAt: po.quotes_added_at,
+    approvedAt: po.approved_at,
+    rejectedAt: po.rejected_at,
+    vendorOrderNumber: po.vendor_order_number,
+    approvalHistory: po.approval_history,
+    warehouseId: po.warehouse_id || 'ARMZ28'
+  }));
+
+  const mapMovements = (rows: any[]): Movement[] => rows.map((m: any) => ({
+    id: m.id,
+    sku: m.sku,
+    productName: m.product_name || m.name || 'Produto Indefinido',
+    type: m.type as Movement['type'],
+    quantity: m.quantity,
+    timestamp: m.timestamp || new Date().toISOString(),
+    user: m.user || 'Sistema',
+    location: m.location || 'N/A',
+    reason: m.reason || 'Sem motivo registrado',
+    orderId: m.order_id,
+    warehouseId: m.warehouse_id || 'ARMZ28'
+  }));
+
+  const mapMaterialRequests = (rows: any[]): MaterialRequest[] => rows.map((r: any) => ({
+    id: r.id,
+    sku: r.sku,
+    name: r.name,
+    qty: r.qty,
+    plate: r.plate,
+    dept: r.dept,
+    priority: r.priority,
+    status: r.status,
+    timestamp: new Date(r.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    costCenter: r.cost_center,
+    warehouseId: r.warehouse_id
+  }));
+
+  const loadDeferredDataset = async (
+    key: 'purchase_orders' | 'movements' | 'material_requests',
+    loader: () => Promise<void>
+  ) => {
+    if (fullLoadInFlight.current.has(key)) return;
+
+    fullLoadInFlight.current.add(key);
+    setIsDeferredModuleLoading(true);
+    try {
+      await loader();
+    } finally {
+      fullLoadInFlight.current.delete(key);
+      if (fullLoadInFlight.current.size === 0) {
+        setIsDeferredModuleLoading(false);
+      }
+    }
+  };
+
+  const loadPurchaseOrdersFull = async () => {
+    if (isPurchaseOrdersFullyLoaded) return;
+
+    await loadDeferredDataset('purchase_orders', async () => {
+      const { data: poData } = await api.from('purchase_orders').select('*').order('request_date', { ascending: false });
+      if (!poData) return;
+
+      setPurchaseOrders(mapPurchaseOrders(poData));
+      setIsPurchaseOrdersFullyLoaded(true);
+    });
+  };
+
+  const loadMovementsFull = async () => {
+    if (isMovementsFullyLoaded) return;
+
+    await loadDeferredDataset('movements', async () => {
+      const { data: movData } = await api.from('movements').select('*').order('timestamp', { ascending: false });
+      if (!movData) return;
+
+      setMovements(mapMovements(movData));
+      setIsMovementsFullyLoaded(true);
+    });
+  };
+
+  const loadMaterialRequestsFull = async () => {
+    if (isMaterialRequestsFullyLoaded) return;
+
+    await loadDeferredDataset('material_requests', async () => {
+      const { data: reqData } = await api.from('material_requests').select('*').order('created_at', { ascending: false });
+      if (!reqData) return;
+
+      setMaterialRequests(mapMaterialRequests(reqData));
+      setIsMaterialRequestsFullyLoaded(true);
+    });
+  };
+
+  const fetchMovementsPage = async (page: number) => {
+    if (!user) return;
+
+    const safePage = Math.max(1, page);
+    const requestId = ++pageFetchSequence.current.movements;
+    setIsMovementsPageLoading(true);
+    try {
+      const { data } = await api
+        .from('movements')
+        .select('*')
+        .eq('warehouse_id', activeWarehouse)
+        .order('timestamp', { ascending: false })
+        .limit(MOVEMENTS_PAGE_SIZE + 1)
+        .offset((safePage - 1) * MOVEMENTS_PAGE_SIZE);
+
+      if (requestId !== pageFetchSequence.current.movements) return;
+
+      if (!data) {
+        setHasMoreMovements(false);
+        setPagedMovements([]);
+        return;
+      }
+
+      const mapped = mapMovements(data);
+      setHasMoreMovements(mapped.length > MOVEMENTS_PAGE_SIZE);
+      setPagedMovements(mapped.slice(0, MOVEMENTS_PAGE_SIZE));
+    } catch (error) {
+      if (requestId !== pageFetchSequence.current.movements) return;
+      console.error('Erro ao carregar pagina de movimentacoes:', error);
+      setHasMoreMovements(false);
+      setPagedMovements([]);
+    } finally {
+      if (requestId === pageFetchSequence.current.movements) {
+        setIsMovementsPageLoading(false);
+      }
+    }
+  };
+
+  const fetchPurchaseOrdersPage = async (page: number) => {
+    if (!user) return;
+
+    const safePage = Math.max(1, page);
+    const requestId = ++pageFetchSequence.current.purchaseOrders;
+    setIsPurchaseOrdersPageLoading(true);
+    try {
+      const { data } = await api
+        .from('purchase_orders')
+        .select('*')
+        .eq('warehouse_id', activeWarehouse)
+        .order('request_date', { ascending: false })
+        .limit(PURCHASE_ORDERS_PAGE_SIZE + 1)
+        .offset((safePage - 1) * PURCHASE_ORDERS_PAGE_SIZE);
+
+      if (requestId !== pageFetchSequence.current.purchaseOrders) return;
+
+      if (!data) {
+        setHasMorePurchaseOrders(false);
+        setPagedPurchaseOrders([]);
+        return;
+      }
+
+      const mapped = mapPurchaseOrders(data);
+      setHasMorePurchaseOrders(mapped.length > PURCHASE_ORDERS_PAGE_SIZE);
+      setPagedPurchaseOrders(mapped.slice(0, PURCHASE_ORDERS_PAGE_SIZE));
+    } catch (error) {
+      if (requestId !== pageFetchSequence.current.purchaseOrders) return;
+      console.error('Erro ao carregar pagina de pedidos:', error);
+      setHasMorePurchaseOrders(false);
+      setPagedPurchaseOrders([]);
+    } finally {
+      if (requestId === pageFetchSequence.current.purchaseOrders) {
+        setIsPurchaseOrdersPageLoading(false);
+      }
+    }
+  };
+
+  const fetchMaterialRequestsPage = async (page: number) => {
+    if (!user) return;
+
+    const safePage = Math.max(1, page);
+    const requestId = ++pageFetchSequence.current.materialRequests;
+    setIsMaterialRequestsPageLoading(true);
+    try {
+      const { data } = await api
+        .from('material_requests')
+        .select('*')
+        .eq('warehouse_id', activeWarehouse)
+        .order('created_at', { ascending: false })
+        .limit(MATERIAL_REQUESTS_PAGE_SIZE + 1)
+        .offset((safePage - 1) * MATERIAL_REQUESTS_PAGE_SIZE);
+
+      if (requestId !== pageFetchSequence.current.materialRequests) return;
+
+      if (!data) {
+        setHasMoreMaterialRequests(false);
+        setPagedMaterialRequests([]);
+        return;
+      }
+
+      const mapped = mapMaterialRequests(data);
+      setHasMoreMaterialRequests(mapped.length > MATERIAL_REQUESTS_PAGE_SIZE);
+      setPagedMaterialRequests(mapped.slice(0, MATERIAL_REQUESTS_PAGE_SIZE));
+    } catch (error) {
+      if (requestId !== pageFetchSequence.current.materialRequests) return;
+      console.error('Erro ao carregar pagina de requisicoes:', error);
+      setHasMoreMaterialRequests(false);
+      setPagedMaterialRequests([]);
+    } finally {
+      if (requestId === pageFetchSequence.current.materialRequests) {
+        setIsMaterialRequestsPageLoading(false);
+      }
+    }
+  };
 
   // API Data Fetching
   useEffect(() => {
@@ -110,47 +363,31 @@ export const App: React.FC = () => {
           const mappedUsers = userData.map((u: any) => ({
             ...u,
             lastAccess: u.last_access,
-            allowedWarehouses: u.allowed_warehouses || ['ARMZ28']
+            modules: Array.isArray(u.modules) ? u.modules : (u.modules ? JSON.parse(u.modules) : []),
+            allowedWarehouses: Array.isArray(u.allowed_warehouses) ? u.allowed_warehouses : (u.allowed_warehouses ? JSON.parse(u.allowed_warehouses) : ['ARMZ28'])
           }));
           setUsers(mappedUsers);
         }
 
-        const { data: poData } = await api.from('purchase_orders').select('*');
-        if (poData) setPurchaseOrders(poData.map((po: any) => ({
-          id: po.id,
-          vendor: po.vendor,
-          requestDate: po.request_date,
-          status: po.status,
-          priority: po.priority,
-          total: po.total,
-          requester: po.requester,
-          items: po.items,
-          quotes: po.quotes,
-          selectedQuoteId: po.selected_quote_id,
-          sentToVendorAt: po.sent_to_vendor_at,
-          receivedAt: po.received_at,
-          quotesAddedAt: po.quotes_added_at,
-          approvedAt: po.approved_at,
-          rejectedAt: po.rejected_at,
-          vendorOrderNumber: po.vendor_order_number,
-          approvalHistory: po.approval_history,
-          warehouseId: po.warehouse_id || 'ARMZ28'
-        })));
+        const { data: poData } = await api
+          .from('purchase_orders')
+          .select('*')
+          .order('request_date', { ascending: false })
+          .limit(INITIAL_PURCHASE_ORDERS_LIMIT);
+        if (poData) {
+          setPurchaseOrders(mapPurchaseOrders(poData));
+          setIsPurchaseOrdersFullyLoaded(poData.length < INITIAL_PURCHASE_ORDERS_LIMIT);
+        }
 
-        const { data: movData } = await api.from('movements').select('*').order('timestamp', { ascending: false });
-        if (movData) setMovements(movData.map((m: any) => ({
-          id: m.id,
-          sku: m.sku,
-          productName: m.product_name || m.name || 'Produto Indefinido',
-          type: m.type as Movement['type'],
-          quantity: m.quantity,
-          timestamp: m.timestamp || new Date().toISOString(),
-          user: m.user || 'Sistema',
-          location: m.location || 'N/A',
-          reason: m.reason || 'Sem motivo registrado',
-          orderId: m.order_id,
-          warehouseId: m.warehouse_id || 'ARMZ28'
-        })));
+        const { data: movData } = await api
+          .from('movements')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .limit(INITIAL_MOVEMENTS_LIMIT);
+        if (movData) {
+          setMovements(mapMovements(movData));
+          setIsMovementsFullyLoaded(movData.length < INITIAL_MOVEMENTS_LIMIT);
+        }
 
         const { data: notifData } = await api.from('notifications').select('*').order('created_at', { ascending: false }).limit(20);
         if (notifData) setAppNotifications(notifData.map((n: any) => ({
@@ -166,20 +403,15 @@ export const App: React.FC = () => {
 
 
 
-        const { data: reqData } = await api.from('material_requests').select('*').order('created_at', { ascending: false });
-        if (reqData) setMaterialRequests(reqData.map((r: any) => ({
-          id: r.id,
-          sku: r.sku,
-          name: r.name,
-          qty: r.qty,
-          plate: r.plate,
-          dept: r.dept,
-          priority: r.priority,
-          status: r.status,
-          timestamp: new Date(r.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          costCenter: r.cost_center,
-          warehouseId: r.warehouse_id
-        })));
+        const { data: reqData } = await api
+          .from('material_requests')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(INITIAL_MATERIAL_REQUESTS_LIMIT);
+        if (reqData) {
+          setMaterialRequests(mapMaterialRequests(reqData));
+          setIsMaterialRequestsFullyLoaded(reqData.length < INITIAL_MATERIAL_REQUESTS_LIMIT);
+        }
 
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -189,13 +421,19 @@ export const App: React.FC = () => {
     const initAuth = async () => {
       setIsLoading(true);
       try {
-        // Primeiro garantimos que os dados (como warehouses) foram carregados pelo fetchData
-        await fetchData();
+        const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+        if (savedToken) {
+          api.setAuthToken(savedToken);
+          // Carrega dados apenas quando há sessão autenticada.
+          await fetchData();
+        } else {
+          localStorage.removeItem('logged_user');
+        }
 
         const savedUser = localStorage.getItem('logged_user');
-        if (savedUser) {
+        if (savedUser && savedToken) {
           const parsedUser = JSON.parse(savedUser);
-          handleLogin(parsedUser);
+          handleLogin(parsedUser, undefined, false);
         }
       } catch (e) {
         console.error('Session recovery failed', e);
@@ -210,6 +448,68 @@ export const App: React.FC = () => {
     // Subscribe removed - using refresh on action
     return () => { };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Relatorios usa dataset completo para consolidacao e indicadores.
+    if (activeModule === 'relatorios' && !isPurchaseOrdersFullyLoaded) {
+      void loadPurchaseOrdersFull();
+    }
+  }, [activeModule, user, isPurchaseOrdersFullyLoaded]);
+
+  useEffect(() => {
+    if (activeModule !== 'movimentacoes') return;
+    if (!user) return;
+    void fetchMovementsPage(movementsPage);
+  }, [activeModule, user, activeWarehouse, movementsPage]);
+
+  useEffect(() => {
+    if (activeModule !== 'compras') return;
+    if (!user) return;
+    void fetchPurchaseOrdersPage(purchaseOrdersPage);
+  }, [activeModule, user, activeWarehouse, purchaseOrdersPage]);
+
+  useEffect(() => {
+    if (activeModule !== 'expedicao') return;
+    if (!user) return;
+    void fetchMaterialRequestsPage(materialRequestsPage);
+  }, [activeModule, user, activeWarehouse, materialRequestsPage]);
+
+  useEffect(() => {
+    if (activeModule !== 'movimentacoes') return;
+    if (!user) return;
+    void fetchMovementsPage(movementsPage);
+  }, [movements]);
+
+  useEffect(() => {
+    if (activeModule !== 'compras') return;
+    if (!user) return;
+    void fetchPurchaseOrdersPage(purchaseOrdersPage);
+  }, [purchaseOrders]);
+
+  useEffect(() => {
+    if (activeModule !== 'expedicao') return;
+    if (!user) return;
+    void fetchMaterialRequestsPage(materialRequestsPage);
+  }, [materialRequests]);
+
+  useEffect(() => {
+    pageFetchSequence.current.movements += 1;
+    pageFetchSequence.current.purchaseOrders += 1;
+    pageFetchSequence.current.materialRequests += 1;
+
+    setMovementsPage(1);
+    setPurchaseOrdersPage(1);
+    setMaterialRequestsPage(1);
+
+    setPagedMovements([]);
+    setPagedPurchaseOrders([]);
+    setPagedMaterialRequests([]);
+    setHasMoreMovements(false);
+    setHasMorePurchaseOrders(false);
+    setHasMoreMaterialRequests(false);
+  }, [activeWarehouse]);
 
   // Auto-logout after 10 minutes of inactivity
   useEffect(() => {
@@ -248,8 +548,8 @@ export const App: React.FC = () => {
       last_access: newUser.lastAccess,
       avatar: newUser.avatar,
       password: newUser.password,
-      modules: JSON.stringify(newUser.modules),
-      allowed_warehouses: JSON.stringify(newUser.allowedWarehouses)
+      modules: newUser.modules,
+      allowed_warehouses: newUser.allowedWarehouses
     });
 
     if (!error) {
@@ -269,8 +569,8 @@ export const App: React.FC = () => {
       status: updatedUser.status,
       avatar: updatedUser.avatar,
       password: updatedUser.password,
-      modules: JSON.stringify(updatedUser.modules),
-      allowed_warehouses: JSON.stringify(updatedUser.allowedWarehouses)
+      modules: updatedUser.modules,
+      allowed_warehouses: updatedUser.allowedWarehouses
     });
 
     if (!error) {
@@ -319,11 +619,18 @@ export const App: React.FC = () => {
       type,
       read: false
     });
-    const newNotif = Array.isArray(newNotifs) ? newNotifs[0] : newNotifs;
+    const insertedNotif = Array.isArray(newNotifs) ? newNotifs[0] : newNotifs;
 
-    if (!error && newNotif) {
-      // Local state update is handled by the real-time subscription in useEffect
-      // but we can also set the temporary toast
+    if (!error && insertedNotif) {
+      setAppNotifications(prev => [{
+        id: insertedNotif.id,
+        title: insertedNotif.title,
+        message: insertedNotif.message,
+        type: insertedNotif.type as AppNotification['type'],
+        read: insertedNotif.read,
+        createdAt: insertedNotif.created_at || new Date().toISOString(),
+        userId: insertedNotif.user_id
+      }, ...prev.slice(0, 19)]);
       showNotification(title, type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success');
     }
   };
@@ -414,7 +721,7 @@ export const App: React.FC = () => {
           priority: autoPO.priority,
           total: autoPO.total,
           requester: autoPO.requester,
-          items: JSON.stringify(autoPO.items),
+          items: autoPO.items,
           warehouse_id: activeWarehouse
         });
 
@@ -446,7 +753,7 @@ export const App: React.FC = () => {
 
     const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'aprovado',
-      approval_history: JSON.stringify(newApprovalHistory),
+      approval_history: newApprovalHistory,
       approved_at: approvalRecord.at
     });
 
@@ -478,7 +785,7 @@ export const App: React.FC = () => {
 
     const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'requisicao', // Volta para o início do fluxo
-      approval_history: JSON.stringify(newApprovalHistory),
+      approval_history: newApprovalHistory,
       rejected_at: rejectionRecord.at
     });
 
@@ -584,7 +891,7 @@ export const App: React.FC = () => {
             showNotification(`Pedido AUTO ${auto.id} cancelado: suprido por manual.`, 'success');
           } else {
             // Atualiza quantidades
-            await api.from('purchase_orders').eq('id', auto.id).update({ items: JSON.stringify(updatedItems) });
+            await api.from('purchase_orders').eq('id', auto.id).update({ items: updatedItems });
             setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, items: updatedItems } : p));
           }
         }
@@ -601,7 +908,7 @@ export const App: React.FC = () => {
       priority: orderWithStatus.priority,
       total: orderWithStatus.total,
       requester: orderWithStatus.requester,
-      items: JSON.stringify(orderWithStatus.items),
+      items: orderWithStatus.items,
       plate: orderWithStatus.plate,
       cost_center: orderWithStatus.costCenter,
       request_date: new Date().toLocaleString('pt-BR'),
@@ -621,7 +928,7 @@ export const App: React.FC = () => {
   const handleAddQuotes = async (poId: string, quotes: Quote[]) => {
     const quotesAddedAt = new Date().toLocaleString('pt-BR');
     const { error } = await api.from('purchase_orders').eq('id', poId).update({
-      quotes: JSON.stringify(quotes),
+      quotes,
       status: 'cotacao',
       quotes_added_at: quotesAddedAt
     });
@@ -648,7 +955,7 @@ export const App: React.FC = () => {
       vendor: selectedQuote.vendorName,
       total: selectedQuote.totalValue,
       status: 'pendente',
-      quotes: JSON.stringify(updatedQuotes)
+      quotes: updatedQuotes
     });
 
     if (!error) {
@@ -767,7 +1074,7 @@ export const App: React.FC = () => {
               addActivity('compra', 'Pedido Cancelado', `${autoPO.id} removido: estoque de ${updatedItem.sku} está em ${updatedItem.quantity}`);
             } else {
               // Atualizar pedido sem o item
-              await api.from('purchase_orders').update({ items: JSON.stringify(updatedItems) }).eq('id', autoPO.id);
+              await api.from('purchase_orders').update({ items: updatedItems }).eq('id', autoPO.id);
               setPurchaseOrders(prev => prev.map(po => po.id === autoPO.id ? { ...po, items: updatedItems } : po));
             }
           } else {
@@ -777,7 +1084,7 @@ export const App: React.FC = () => {
                 item.sku === updatedItem.sku ? { ...item, qty: newQty } : item
               );
 
-              await api.from('purchase_orders').update({ items: JSON.stringify(updatedItems) }).eq('id', autoPO.id);
+              await api.from('purchase_orders').update({ items: updatedItems }).eq('id', autoPO.id);
               setPurchaseOrders(prev => prev.map(po => po.id === autoPO.id ? { ...po, items: updatedItems } : po));
 
               addActivity('compra', 'Pedido Atualizado', `${autoPO.id} recalculado: ${updatedItem.sku} agora requisita ${newQty} un.`);
@@ -1153,10 +1460,8 @@ export const App: React.FC = () => {
       let allVeiculos: any[] = [];
       let nextUrl = 'https://cubogpm-frota.nortesistech.com/api/veiculos/?format=json';
 
-      const edgeFunctionUrl = `http://localhost:3001/fleet-sync`;
-      if (import.meta.env.PROD) {
-        // En produção, o Nginx pode redirecionar /api/fleet-sync se houver essa rota no backend
-      }
+      const edgeFunctionUrl = `${api.getBaseUrl()}/fleet-sync`;
+      const authToken = api.getAuthToken();
 
       while (nextUrl) {
         console.log(`Chamando Bridge para: ${nextUrl}`);
@@ -1165,7 +1470,7 @@ export const App: React.FC = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRmaGZta3VxbmhmYmxzb3J2Zm9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwMzc3ODYsImV4cCI6MjA4NTYxMzc4Nn0.YGVt8iW3rm2FHWqtHXub4db7avXLUBPvsfvcrPrpfos'
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
           },
           body: JSON.stringify({ token, url: nextUrl })
         });
@@ -1276,7 +1581,7 @@ export const App: React.FC = () => {
       priority: autoPO.priority,
       total: autoPO.total,
       requester: autoPO.requester,
-      items: JSON.stringify(autoPO.items),
+      items: autoPO.items,
       request_date: new Date().toLocaleString('pt-BR'),
       warehouse_id: activeWarehouse
     });
@@ -1305,9 +1610,11 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogin = (loggedInUser: User) => {
-    // Salva no localStorage para persistir o F5
+  const handleLogin = (loggedInUser: User, token?: string, registerActivity = true) => {
     localStorage.setItem('logged_user', JSON.stringify(loggedInUser));
+    if (token) {
+      api.setAuthToken(token);
+    }
 
     setUser(loggedInUser);
 
@@ -1327,11 +1634,41 @@ export const App: React.FC = () => {
       setActiveWarehouse(allowed[0]);
     }
 
-    addActivity('alerta', 'Login Realizado', `Usuário ${loggedInUser.name} acessou o sistema`);
+    if (registerActivity) {
+      addActivity('alerta', 'Login Realizado', `Usuário ${loggedInUser.name} acessou o sistema`);
+    }
+
+    if (token) {
+      window.location.reload();
+    }
   };
 
   const logout = () => {
+    api.clearAuthToken();
     localStorage.removeItem('logged_user');
+    pageFetchSequence.current.movements += 1;
+    pageFetchSequence.current.purchaseOrders += 1;
+    pageFetchSequence.current.materialRequests += 1;
+    setPurchaseOrders([]);
+    setMovements([]);
+    setMaterialRequests([]);
+    setIsPurchaseOrdersFullyLoaded(false);
+    setIsMovementsFullyLoaded(false);
+    setIsMaterialRequestsFullyLoaded(false);
+    setIsDeferredModuleLoading(false);
+    setPagedPurchaseOrders([]);
+    setPagedMovements([]);
+    setPagedMaterialRequests([]);
+    setHasMorePurchaseOrders(false);
+    setHasMoreMovements(false);
+    setHasMoreMaterialRequests(false);
+    setIsPurchaseOrdersPageLoading(false);
+    setIsMovementsPageLoading(false);
+    setIsMaterialRequestsPageLoading(false);
+    setPurchaseOrdersPage(1);
+    setMovementsPage(1);
+    setMaterialRequestsPage(1);
+    fullLoadInFlight.current.clear();
     setUser(null);
   };
 
@@ -1347,7 +1684,7 @@ export const App: React.FC = () => {
   }
 
   if (!user) {
-    return <LoginPage users={users} onLogin={handleLogin} />;
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   const handleUpdateInventoryQuantity = async (sku: string, qty: number) => {
@@ -1392,6 +1729,7 @@ export const App: React.FC = () => {
     if (error) {
       showNotification('Erro ao criar solicitação', 'error');
     } else {
+      setMaterialRequests(prev => [data, ...prev]);
       showNotification('Solicitação criada com sucesso!', 'success');
       addActivity('expedicao', 'Nova Solicitação SA', `Item ${data.sku} solicitado para veículo ${data.plate}`);
     }
@@ -1402,6 +1740,7 @@ export const App: React.FC = () => {
     if (error) {
       showNotification('Erro ao atualizar status', 'error');
     } else {
+      setMaterialRequests(prev => prev.map(request => request.id === id ? { ...request, status } : request));
       showNotification('Status da solicitação atualizado!', 'success');
     }
   };
@@ -1445,6 +1784,12 @@ export const App: React.FC = () => {
             </div>
           )}
 
+          {isDeferredModuleLoading && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider shadow-xl">
+              Carregando dados completos do modulo...
+            </div>
+          )}
+
           {/* Warehouse Selector Integration */}
           <WarehouseSelector
             warehouses={warehouses}
@@ -1459,43 +1804,63 @@ export const App: React.FC = () => {
             }}
           />
 
-          {activeModule === 'dashboard' && (
-            <Dashboard
-              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
-              activities={activities}
-            />
-          )}
-          {activeModule === 'recebimento' && (
-            <Receiving
-              onFinalize={handleFinalizeReceipt}
-              availablePOs={purchaseOrders.filter(po => po.warehouseId === activeWarehouse && po.status === 'enviado')}
-            />
-          )}
-          {activeModule === 'movimentacoes' && (
-            <Movements
-              movements={movements.filter(m => m.warehouseId === activeWarehouse)}
-            />
-          )}
-          {activeModule === 'estoque' && (
-            <Inventory
-              items={inventory.filter(i => i.warehouseId === activeWarehouse)}
-              onUpdateItem={handleUpdateInventoryItem}
-              onCreateAutoPO={handleCreateAutoPO}
-              onRecalculateROP={handleRecalculateROP}
-            />
-          )}
-          {activeModule === 'expedicao' && (
-            <Expedition
-              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
-              requests={materialRequests.filter(r => r.warehouseId === activeWarehouse)}
-              onProcessPicking={handleUpdateInventoryQuantity}
-              onRequestCreate={handleRequestCreate}
-              onRequestUpdate={handleRequestUpdate}
-              activeWarehouse={activeWarehouse}
-            />
-          )}
-          {
-            activeModule === 'inventario_ciclico' && (
+          <Suspense
+            fallback={
+              <div className="w-full flex items-center justify-center py-20">
+                <div className="flex items-center gap-3 text-slate-500">
+                  <div className="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs font-black uppercase tracking-wider">Carregando modulo...</span>
+                </div>
+              </div>
+            }
+          >
+            {activeModule === 'dashboard' && (
+              <Dashboard
+                inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                activities={activities}
+              />
+            )}
+            {activeModule === 'recebimento' && (
+              <Receiving
+                onFinalize={handleFinalizeReceipt}
+                availablePOs={purchaseOrders.filter(po => po.warehouseId === activeWarehouse && po.status === 'enviado')}
+              />
+            )}
+            {activeModule === 'movimentacoes' && (
+              <Movements
+                movements={pagedMovements}
+                currentPage={movementsPage}
+                pageSize={MOVEMENTS_PAGE_SIZE}
+                hasNextPage={hasMoreMovements}
+                isPageLoading={isMovementsPageLoading}
+                onPageChange={setMovementsPage}
+              />
+            )}
+            {activeModule === 'estoque' && (
+              <Inventory
+                items={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                onUpdateItem={handleUpdateInventoryItem}
+                onCreateAutoPO={handleCreateAutoPO}
+                onRecalculateROP={handleRecalculateROP}
+              />
+            )}
+            {activeModule === 'expedicao' && (
+              <Expedition
+                inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                vehicles={vehicles}
+                requests={pagedMaterialRequests}
+                onProcessPicking={handleUpdateInventoryQuantity}
+                onRequestCreate={handleRequestCreate}
+                onRequestUpdate={handleRequestUpdate}
+                activeWarehouse={activeWarehouse}
+                currentPage={materialRequestsPage}
+                pageSize={MATERIAL_REQUESTS_PAGE_SIZE}
+                hasNextPage={hasMoreMaterialRequests}
+                isPageLoading={isMaterialRequestsPageLoading}
+                onPageChange={setMaterialRequestsPage}
+              />
+            )}
+            {activeModule === 'inventario_ciclico' && (
               <CyclicInventory
                 inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
                 batches={cyclicBatches.filter(b => b.warehouseId === activeWarehouse)}
@@ -1503,50 +1868,60 @@ export const App: React.FC = () => {
                 onFinalizeBatch={handleFinalizeCyclicBatch}
                 onClassifyABC={handleClassifyABC}
               />
-            )
-          }
+            )}
 
-          {activeModule === 'compras' && (
-            <PurchaseOrders
-              user={user}
-              orders={purchaseOrders.filter(po => po.warehouseId === activeWarehouse)}
-              vendors={vendors}
-              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
-              onCreateOrder={handleCreatePO}
-              onAddQuotes={handleAddQuotes}
-              onSendToApproval={handleSendToApproval}
-              onMarkAsSent={handleMarkAsSent}
-              onApprove={handleApprovePO}
-              onReject={handleRejectPO}
-            />
-          )}
-          {activeModule === 'cadastro' && (
-            <MasterData
-              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
-              vendors={vendors}
-              onAddRecord={handleAddMasterRecord}
-              onRemoveRecord={handleRemoveMasterRecord}
-              onImportRecords={handleImportMasterRecords}
-            />
-          )}
-          {activeModule === 'relatorios' && (
-            <Reports
-              orders={purchaseOrders.filter(po => po.warehouseId === activeWarehouse)}
-            />
-          )}
-          {activeModule === 'configuracoes' && (
-            <Settings
-              users={users}
-              warehouses={warehouses}
-              onAddUser={handleAddUser}
-              onUpdateUser={handleUpdateUser}
-              onDeleteUser={handleDeleteUser}
-            />
-          )}
+            {activeModule === 'compras' && (
+              <PurchaseOrders
+                user={user}
+                activeWarehouse={activeWarehouse}
+                orders={pagedPurchaseOrders}
+                vendors={vendors}
+                inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                vehicles={vehicles}
+                onCreateOrder={handleCreatePO}
+                onAddQuotes={handleAddQuotes}
+                onSendToApproval={handleSendToApproval}
+                onMarkAsSent={handleMarkAsSent}
+                onApprove={handleApprovePO}
+                onReject={handleRejectPO}
+                currentPage={purchaseOrdersPage}
+                pageSize={PURCHASE_ORDERS_PAGE_SIZE}
+                hasNextPage={hasMorePurchaseOrders}
+                isPageLoading={isPurchaseOrdersPageLoading}
+                onPageChange={setPurchaseOrdersPage}
+              />
+            )}
+            {activeModule === 'cadastro' && (
+              <MasterData
+                inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                vendors={vendors}
+                vehicles={vehicles}
+                onAddRecord={handleAddMasterRecord}
+                onRemoveRecord={handleRemoveMasterRecord}
+                onImportRecords={handleImportMasterRecords}
+                onSyncAPI={handleSyncFleetAPI}
+              />
+            )}
+            {activeModule === 'relatorios' && (
+              <Reports
+                orders={purchaseOrders.filter(po => po.warehouseId === activeWarehouse)}
+              />
+            )}
+            {activeModule === 'configuracoes' && (
+              <Settings
+                users={users}
+                warehouses={warehouses}
+                onAddUser={handleAddUser}
+                onUpdateUser={handleUpdateUser}
+                onDeleteUser={handleDeleteUser}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
     </div>
   );
 };
+
 
 

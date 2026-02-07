@@ -1,0 +1,19 @@
+[
+  {
+    "id": "V-001",
+    "name": "Peças Norte Distribuidora",
+    "contact": "Marcos Silva",
+    "email": "vendas@pecasnorte.com",
+    "phone": "(92) 3344-5566",
+    "category": "Peças Pesadas",
+    "cnpj": "0000000000000"
+  },
+  {
+    "id": "V-002",
+    "name": "LubriExpress Manaus",
+    "contact": "Ana Paula",
+    "email": "ana@lubriexpress.com",
+    "phone": "(92) 98877-6655",
+    "category": "Lubrificantes"
+  }
+]
