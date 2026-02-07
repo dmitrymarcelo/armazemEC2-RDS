@@ -59,17 +59,28 @@ export interface Activity {
   time: string;
 }
 
+export interface Warehouse {
+  id: string;
+  name: string;
+  description?: string;
+  location?: string;
+  managerName?: string;
+  managerEmail?: string;
+  isActive: boolean;
+}
+
 export interface Movement {
   id: string;
-  timestamp: string;
-  type: 'entrada' | 'saida' | 'ajuste';
   sku: string;
-  productName: string;
+  productName: string; // Restored for compatibility
+  type: 'entrada' | 'saida' | 'ajuste';
   quantity: number;
-  user: string;
+  timestamp: string;
+  user: string; // Restored for compatibility
   location: string;
   reason: string;
-  orderId?: string; // ID do Pedido de Compra de origem (quando aplicável)
+  orderId?: string;
+  warehouseId: string; // NOVO: Armazém onde ocorreu a movimentação
 }
 
 export interface InventoryItem {
@@ -89,6 +100,7 @@ export interface InventoryItem {
   safetyStock: number;
   abcCategory?: 'A' | 'B' | 'C';
   lastCountedAt?: string;
+  warehouseId: string; // NOVO: Armazém onde o item está localizado
 }
 
 export interface Quote {
@@ -130,6 +142,9 @@ export interface PurchaseOrder {
   receivedAt?: string;
   vendorOrderNumber?: string;
   approvalHistory?: ApprovalRecord[];
+  plate?: string;
+  costCenter?: string;
+  warehouseId: string; // NOVO: Armazém de destino do pedido
 }
 
 export interface Vendor {
@@ -145,10 +160,10 @@ export interface Vendor {
 export interface Vehicle {
   plate: string;
   model: string;
-  driver: string;
-  type: 'Truck' | 'VUC' | 'Carreta' | 'Van';
+  type: string; // Expanded to support API types like LANCHA, PASSEIO, etc.
   lastMaintenance: string;
-  status: 'Disponível' | 'Em Viagem' | 'Manutenção';
+  status: 'Disponível' | 'Em Viagem' | 'Manutenção' | string;
+  costCenter?: string;
 }
 
 export interface User {
@@ -160,7 +175,8 @@ export interface User {
   lastAccess: string;
   avatar: string;
   modules: Module[];
-  password?: string; // Optional for security in frontend display, required for logic
+  password?: string;
+  allowedWarehouses: string[]; // NOVO: Armazéns que o usuário pode acessar
 }
 export interface AppNotification {
   id: string;
@@ -180,6 +196,7 @@ export interface CyclicBatch {
   accuracyRate?: number;
   totalItems: number;
   divergentItems: number;
+  warehouseId: string; // NOVO: Armazém onde o inventário está sendo realizado
 }
 
 export interface CyclicCount {
@@ -191,4 +208,13 @@ export interface CyclicCount {
   status: 'pendente' | 'contado' | 'ajustado';
   notes?: string;
   countedAt?: string;
+}
+
+export interface CostCenter {
+  id: string;
+  code: string;
+  name: string;
+  manager: string;
+  budget: number;
+  status: 'Ativo' | 'Inativo';
 }

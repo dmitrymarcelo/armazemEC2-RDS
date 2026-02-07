@@ -201,7 +201,7 @@ const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders })
         </div>
       </div>
 
-      <div className="bg-slate-50/50 dark:bg-slate-800/10 p-10 rounded-[3rem] border border-slate-200/50 dark:border-slate-800">
+      <div className="bg-slate-50/50 dark:bg-slate-800/10 p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-800">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <div className="w-1 h-4 bg-primary rounded-full" />

@@ -120,8 +120,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
 
       <aside className={`
         fixed inset-y-0 left-0 z-50 lg:relative lg:translate-x-0 transition-transform duration-500 ease-in-out
-        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        ${isCollapsed ? 'lg:w-24' : 'lg:w-72'} w-72
+        ${isMobileOpen ? 'translate-x-0 flex' : '-translate-x-full lg:translate-x-0 hidden lg:flex'}
+        ${isCollapsed ? 'lg:w-24' : 'lg:w-64'} w-72
         border-r border-[#dbe0e6] dark:border-[#2d3748] bg-white dark:bg-[#1a222c] flex flex-col flex-shrink-0 h-full relative overflow-hidden
       `}>
         {/* Toggle Button - Desktop Only */}
@@ -145,11 +145,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
         </button>
 
         {/* Header / Logo */}
-        <div className={`flex flex-col items-center justify-center transition-all duration-500 ${isCollapsed ? 'lg:p-6 p-10 gap-2' : 'p-10 gap-5'}`}>
+        <div className={`flex flex-col items-center justify-center transition-all duration-500 ${isCollapsed ? 'lg:p-4 p-6 gap-2' : 'p-6 gap-4'}`}>
           <img
             src={`${import.meta.env.BASE_URL}norte_tech_logo.png`}
             alt="Norte Tech Logo"
-            className={`w-auto drop-shadow-2xl transition-all duration-500 hover:scale-105 ${isCollapsed ? 'lg:h-12 h-20' : 'h-32'}`}
+            className={`w-auto drop-shadow-2xl transition-all duration-500 hover:scale-105 ${isCollapsed ? 'lg:h-10 h-16' : 'h-24'}`}
           />
           <div className={`text-center transition-all duration-500 ${isCollapsed ? 'lg:opacity-0 lg:h-0 lg:scale-90 lg:translate-y-[-10px] lg:pointer-events-none' : 'opacity-100 h-auto scale-100 translate-y-0'}`}>
             <p className="text-[#617589] text-[11px] font-black uppercase tracking-[0.3em]">Armazém 028</p>
@@ -183,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
         </nav>
 
         {/* Settings Section */}
-        <div className={`mt-auto border-t border-[#dbe0e6] dark:border-[#2d3748] transition-all duration-500 ${isCollapsed ? 'lg:p-4 lg:py-4 p-6' : 'p-6'}`}>
+        <div className="mt-auto bg-slate-50/50 dark:bg-slate-800/10 p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-800 transition-all duration-500">
           <button
             onClick={() => onModuleChange('configuracoes')}
             className={`w-full flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-4'} ${activeModule === 'configuracoes'

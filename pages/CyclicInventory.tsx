@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { InventoryItem, CyclicBatch, CyclicCount } from '../types';
-import { supabase } from '../supabase';
+import { api } from '../api-client';
 
 interface CyclicInventoryProps {
     inventory: InventoryItem[];
@@ -33,7 +33,7 @@ export const CyclicInventory: React.FC<CyclicInventoryProps> = ({ inventory, bat
     };
 
     const handleOpenCount = async (batch: CyclicBatch) => {
-        const { data: counts } = await supabase.from('cyclic_counts').select('*').eq('batch_id', batch.id);
+        const { data: counts } = await api.from('cyclic_counts').select('*').eq('batch_id', batch.id);
         if (counts) {
             setCurrentCounts(counts.map(c => ({
                 id: c.id,

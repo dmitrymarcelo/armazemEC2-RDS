@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { supabase } from '../supabase';
+import { api } from '../api-client';
 
 interface LoginPageProps {
     users: User[];
@@ -17,31 +17,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({ users, onLogin }) => {
         setError('');
 
         try {
-            // Find user by Name or Email in Supabase
-            const { data, error: dbError } = await supabase
-                .from('users')
-                .select('*')
-                .or(`email.eq.${loginInput},name.eq.${loginInput},name.eq.Administrador`)
-                .eq('password', password)
-                .eq('status', 'Ativo');
+            // New Secure Login via Backend (OWASP Guard)
+            const response = await api.from('login').insert({
+                email: loginInput,
+                password: password
+            }).execute();
 
-            if (dbError) throw dbError;
+            if (response.error) {
+                setError(response.error === 'Unauthorized' || response.error === 'Credenciais inválidas'
+                    ? 'Credenciais inválidas ou usuário inativo'
+                    : response.error);
+                return;
+            }
 
-            // Extra check for "admin" alias if name is Administrador
-            const foundUser = data?.find(u =>
-                u.email === loginInput ||
-                u.name === loginInput ||
-                (u.name === 'Administrador' && loginInput === 'admin')
-            );
+            const finalUser = response.data;
 
-            if (foundUser) {
+            if (finalUser) {
                 // Normalize snake_case from DB to camelCase for App
                 onLogin({
-                    ...foundUser,
-                    lastAccess: foundUser.last_access
+                    ...finalUser,
+                    lastAccess: finalUser.last_access,
+                    warehouseId: finalUser.warehouse_id || 'ARMZ28',
+                    modules: Array.isArray(finalUser.modules) ? finalUser.modules : (finalUser.modules ? JSON.parse(finalUser.modules) : []),
+                    allowedWarehouses: Array.isArray(finalUser.allowed_warehouses) ? finalUser.allowed_warehouses : (finalUser.allowed_warehouses ? JSON.parse(finalUser.allowed_warehouses) : [])
                 });
-            } else {
-                setError('Credenciais inválidas ou usuário inativo');
             }
         } catch (err) {
             console.error('Login error:', err);
@@ -122,21 +121,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ users, onLogin }) => {
                         </button>
                     </form>
 
-                    <div className="mt-10 pt-8 border-t border-slate-100 dark:border-slate-700/50">
-                        <div className="text-center mb-4">
-                            <span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Credenciais Homologação</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                <span className="block text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase">Admin</span>
-                                <span className="text-[11px] font-medium text-slate-400">admin / admin</span>
-                            </div>
-                            <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                <span className="block text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase">Comprador</span>
-                                <span className="text-[11px] font-medium text-slate-400">comprador / 123</span>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

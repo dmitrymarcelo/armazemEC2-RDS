@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Estoque Crítico: ACE-10",
+    "message": "Saldo de 8 está abaixo do mínimo (15). Requisição de compra AUTO-1770419462795-785 gerada.",
+    "type": "warning",
+    "read": false
+  },
+  {
+    "title": "Estoque Crítico: ACE-10",
+    "message": "Saldo de 8 está abaixo do mínimo (15). Requisição de compra AUTO-1770434876181-760 gerada.",
+    "type": "warning",
+    "read": false
+  }
+]

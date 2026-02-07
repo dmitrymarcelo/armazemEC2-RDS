@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { User, ALL_MODULES, Module, ROLE_LABELS } from '../types';
+import { User, ALL_MODULES, Module, ROLE_LABELS, Warehouse } from '../types';
 
 interface SettingsProps {
   users: User[];
+  warehouses: Warehouse[]; // NOVO
   onAddUser: (user: User) => void;
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ users, onAddUser, onUpdateUser, onDeleteUser }) => {
+export const Settings: React.FC<SettingsProps> = ({ users, warehouses, onAddUser, onUpdateUser, onDeleteUser }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [newUser, setNewUser] = useState<Partial<User>>({
@@ -17,12 +18,13 @@ export const Settings: React.FC<SettingsProps> = ({ users, onAddUser, onUpdateUs
     role: 'buyer',
     password: '',
     status: 'Ativo',
-    modules: []
+    modules: [],
+    allowedWarehouses: ['ARMZ28'] // Default
   });
 
   const openAddModal = () => {
     setEditingUser(null);
-    setNewUser({ name: '', email: '', role: 'buyer', password: '', status: 'Ativo', modules: [] });
+    setNewUser({ name: '', email: '', role: 'buyer', password: '', status: 'Ativo', modules: [], allowedWarehouses: ['ARMZ28'] });
     setIsModalOpen(true);
   };
 
@@ -50,13 +52,27 @@ export const Settings: React.FC<SettingsProps> = ({ users, onAddUser, onUpdateUs
           lastAccess: 'Nunca',
           avatar: `https://ui-avatars.com/api/?name=${newUser.name}&background=random`,
           password: newUser.password || '123456',
-          modules: newUser.modules || []
+          modules: newUser.modules || [],
+          allowedWarehouses: newUser.allowedWarehouses || ['ARMZ28']
         });
       }
       setIsModalOpen(false);
       setEditingUser(null);
-      setNewUser({ name: '', email: '', role: 'buyer', password: '', status: 'Ativo', modules: [] });
+      setNewUser({ name: '', email: '', role: 'buyer', password: '', status: 'Ativo', modules: [], allowedWarehouses: ['ARMZ28'] });
     }
+  };
+
+  const toggleWarehouse = (warehouseId: string) => {
+    setNewUser(prev => {
+      const current = prev.allowedWarehouses || [];
+      if (current.includes(warehouseId)) {
+        // Garantir que pelo menos um sempre esteja selecionado
+        if (current.length === 1) return prev;
+        return { ...prev, allowedWarehouses: current.filter(w => w !== warehouseId) };
+      } else {
+        return { ...prev, allowedWarehouses: [...current, warehouseId] };
+      }
+    });
   };
 
   const toggleModule = (moduleId: Module) => {
@@ -273,7 +289,7 @@ export const Settings: React.FC<SettingsProps> = ({ users, onAddUser, onUpdateUs
                   {ALL_MODULES.map(module => (
                     <label key={module.id} className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${(newUser.modules || []).includes(module.id)
                       ? 'bg-primary/5 border-primary/30'
-                      : 'bg-slate-50 border-gray-100 hover:bg-slate-100'
+                      : 'bg-slate-50 dark:bg-slate-800 border-gray-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700'
                       }`}>
                       <input
                         type="checkbox"
@@ -282,6 +298,30 @@ export const Settings: React.FC<SettingsProps> = ({ users, onAddUser, onUpdateUs
                         className="rounded border-gray-300 text-primary focus:ring-primary"
                       />
                       <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{module.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Seção de Armazéns Permetidos */}
+              <div className="pt-2">
+                <label className="block text-xs font-black uppercase text-gray-500 mb-2">Armazéns com Permissão</label>
+                <div className="flex flex-wrap gap-3">
+                  {warehouses.map(wh => (
+                    <label key={wh.id} className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all flex-1 min-w-[140px] ${(newUser.allowedWarehouses || []).includes(wh.id)
+                      ? 'bg-blue-500/10 border-blue-500/30'
+                      : 'bg-slate-50 dark:bg-slate-800 border-gray-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}>
+                      <input
+                        type="checkbox"
+                        checked={(newUser.allowedWarehouses || []).includes(wh.id)}
+                        onChange={() => toggleWarehouse(wh.id)}
+                        className="rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-gray-800 dark:text-white uppercase">{wh.id}</span>
+                        <span className="text-[10px] font-bold text-gray-500">{wh.name}</span>
+                      </div>
                     </label>
                   ))}
                 </div>

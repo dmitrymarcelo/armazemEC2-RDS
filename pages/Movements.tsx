@@ -23,13 +23,6 @@ export const Movements: React.FC<MovementsProps> = ({ movements }) => {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Auditoria de Fluxo</span>
-          </div>
           <h2 className="text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Movimentações do Sistema</h2>
           <p className="text-slate-500 text-sm font-medium mt-1">Registro cronológico de todas as alterações de saldo e endereçamento.</p>
         </div>
@@ -93,8 +86,8 @@ export const Movements: React.FC<MovementsProps> = ({ movements }) => {
               {filteredMovements.length > 0 ? filteredMovements.map((move) => (
                 <tr key={move.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
                   <td className="px-8 py-5">
-                    <p className="text-xs font-black text-slate-800 dark:text-white leading-tight">{move.timestamp.split(' ')[0]}</p>
-                    <p className="text-[10px] text-slate-400 font-bold">{move.timestamp.split(' ')[1]}</p>
+                    <p className="text-xs font-black text-slate-800 dark:text-white leading-tight">{move.timestamp?.split(' ')[0] || '-'}</p>
+                    <p className="text-[10px] text-slate-400 font-bold">{move.timestamp?.split(' ')[1] || '-'}</p>
                   </td>
                   <td className="px-8 py-5 text-center">
                     <span className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tight ${move.type === 'entrada' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
@@ -105,20 +98,20 @@ export const Movements: React.FC<MovementsProps> = ({ movements }) => {
                     </span>
                   </td>
                   <td className="px-8 py-5">
-                    <p className="text-sm font-black text-slate-800 dark:text-white truncate max-w-[200px] leading-tight">{move.productName}</p>
+                    <p className="text-sm font-black text-slate-800 dark:text-white truncate max-w-[200px] leading-tight">{move.productName || 'N/A'}</p>
                     <p className="text-[10px] font-black text-primary uppercase">Cód. Produto: {move.sku}</p>
                   </td>
                   <td className="px-8 py-5 text-center font-black text-sm">
                     <span className={move.type === 'saida' ? 'text-red-500' : move.type === 'entrada' ? 'text-emerald-600' : 'text-primary'}>
-                      {move.type === 'saida' ? '-' : '+'}{Math.abs(move.quantity)}
+                      {move.type === 'saida' ? '-' : '+'}{Math.abs(move.quantity || 0)}
                     </span>
                   </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-2">
                       <div className="size-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[8px] font-black uppercase text-slate-500">
-                        {move.user.charAt(0)}
+                        {(move.user || 'S').charAt(0)}
                       </div>
-                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">{move.user}</span>
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">{move.user || 'Sistema'}</span>
                     </div>
                   </td>
                   <td className="px-8 py-5">

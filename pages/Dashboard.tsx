@@ -42,7 +42,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ inventory, activities }) =
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {dynamicKpis.map((kpi, idx) => (
           <div key={idx} className="relative h-32 sm:h-40 rounded-3xl sm:rounded-[2rem] overflow-hidden group shadow-lg hover:shadow-2xl transition-all duration-500 cursor-pointer">
             <div className="absolute inset-0">
@@ -62,9 +62,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ inventory, activities }) =
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 space-y-6 lg:space-y-8">
-          <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-[2rem] lg:rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200/60 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-8 lg:mb-10">
               <div>
                 <h3 className="text-lg lg:text-xl font-black tracking-tight text-slate-800 dark:text-white">Vazão de Operações</h3>

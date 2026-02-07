@@ -1,20 +1,242 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+  <img src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" alt="LogiWMS-Pro Banner" width="100%"/>
+  
+  # 📦 LogiWMS-Pro
+  ### Gestão Inteligente de Armazém - Sistema WMS Completo
+  
+  [![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)](https://reactjs.org/)
+  [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+  [![Node.js](https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js)](https://nodejs.org/)
+  [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## 🚀 Sobre o Projeto
 
-View your app in AI Studio: https://ai.studio/apps/drive/1r-KcAe4elks1gKYt-Z3ayHulS9A8mj67
+**LogiWMS-Pro** é um sistema completo de **Warehouse Management System (WMS)** desenvolvido para otimizar operações logísticas em centros de distribuição. Com foco em **usabilidade**, **segurança** e **performance**, o sistema oferece controle total sobre:
 
-## Run Locally
+- 📥 **Recebimento de Mercadorias**
+- 📦 **Gestão de Estoque** com classificação ABC
+- 🔄 **Movimentações Internas**
+- 📤 **Expedição e Solicitações SA**
+- 🔍 **Inventário Cíclico**
+- 🛒 **Gestão de Compras** com cotações e aprovações
+- 📊 **Relatórios Analíticos**
+- 👥 **Controle de Usuários e Permissões**
 
-**Prerequisites:**  Node.js
+---
 
+## ✨ Principais Funcionalidades
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 🎯 Dashboard Inteligente
+- KPIs em tempo real (volume, ocupação, alertas)
+- Gráficos de produtividade
+- Atividades recentes do sistema
+
+### 🔐 Segurança OWASP
+- Autenticação server-side
+- Sanitização automática de dados
+- Proteção contra SQL Injection
+- Whitelist de tabelas
+
+### 📱 Interface Moderna
+- Design responsivo (desktop, tablet, mobile)
+- Dark mode nativo
+- Animações fluidas
+- Sidebar colapsável
+
+### 🔄 Persistência Híbrida
+- Suporte a PostgreSQL/SQLite
+- Fallback automático para JSON
+- Sincronização de dados
+
+---
+
+## 🛠️ Tecnologias Utilizadas
+
+### Frontend
+- **React 18.3** - Biblioteca UI
+- **TypeScript 5.6** - Tipagem estática
+- **Vite** - Build tool ultrarrápido
+- **Recharts** - Gráficos e visualizações
+- **XLSX** - Importação/exportação Excel
+
+### Backend
+- **Node.js 24.x** - Runtime JavaScript
+- **Express** - Framework web
+- **PostgreSQL** - Banco de dados principal
+- **SQLite** - Banco alternativo local
+
+### Segurança
+- **OWASP Guard** - Auditoria automática
+- **TDD Mastery** - Desenvolvimento orientado a testes
+- **Agent Manager** - Otimização de tarefas
+
+---
+
+## 📋 Pré-requisitos
+
+- **Node.js** >= 18.0.0
+- **npm** ou **yarn**
+- **PostgreSQL** (opcional - usa JSON como fallback)
+
+---
+
+## ⚙️ Instalação
+
+### 1. Clone o repositório
+```bash
+git clone https://github.com/seu-usuario/logiwms-pro.git
+cd logiwms-pro
+```
+
+### 2. Instale as dependências
+
+**Frontend:**
+```bash
+npm install
+```
+
+**Backend:**
+```bash
+cd api-backend
+npm install
+cd ..
+```
+
+### 3. Configure as variáveis de ambiente (opcional)
+
+Crie um arquivo `.env.local` na raiz do projeto:
+```env
+VITE_API_URL=http://localhost:3001
+GEMINI_API_KEY=sua_chave_aqui
+```
+
+### 4. Inicie o sistema
+
+**Terminal 1 - Backend:**
+```bash
+cd api-backend
+npm start
+```
+
+**Terminal 2 - Frontend:**
+```bash
+npm run dev
+```
+
+### 5. Acesse o sistema
+Abra seu navegador em: **http://localhost:3000**
+
+---
+
+## 🔑 Credenciais de Acesso
+
+### Administrador
+- **Email:** `admin@nortetech.com`
+- **Senha:** `admin`
+
+### Gerente
+- **Email:** `MATIAS@G.COM`
+- **Senha:** `1234`
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+logiwms-pro/
+├── api-backend/          # Backend Node.js + Express
+│   ├── data/            # Dados JSON (fallback)
+│   ├── tests/           # Testes automatizados
+│   └── index.js         # Servidor principal
+├── components/          # Componentes React reutilizáveis
+├── pages/              # Páginas/Módulos do sistema
+├── public/             # Assets estáticos
+├── types.ts            # Definições TypeScript
+├── App.tsx             # Componente principal
+└── schema.sql          # Schema do banco de dados
+
+```
+
+---
+
+## 🧪 Testes
+
+Execute os testes automatizados:
+
+```bash
+# Testes do backend
+cd api-backend
+npm test
+
+# Testes do frontend
+npm test
+```
+
+---
+
+## 🚢 Deploy
+
+### Opção 1: Vercel (Frontend) + Railway (Backend)
+1. Deploy frontend no Vercel
+2. Deploy backend no Railway
+3. Configure variáveis de ambiente
+
+### Opção 2: Docker
+```bash
+docker-compose up -d
+```
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="45%"/>
+  <img src="docs/screenshots/inventory.png" alt="Estoque" width="45%"/>
+</div>
+
+---
+
+## 🤝 Contribuindo
+
+Contribuições são bem-vindas! Para contribuir:
+
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+---
+
+## 📝 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+---
+
+## 👨‍💻 Autor
+
+**Norte Tech Solutions**
+- Website: [nortetech.com](https://nortetech.com)
+- Email: contato@nortetech.com
+
+---
+
+## 🙏 Agradecimentos
+
+- [React](https://reactjs.org/)
+- [Vite](https://vitejs.dev/)
+- [Recharts](https://recharts.org/)
+- [OWASP](https://owasp.org/)
+
+---
+
+<div align="center">
+  Feito com ❤️ por <strong>Norte Tech</strong>
+  
+  ⭐ Se este projeto te ajudou, considere dar uma estrela!
+</div>

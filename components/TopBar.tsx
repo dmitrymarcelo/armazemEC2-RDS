@@ -30,7 +30,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111922] px-4 lg:px-8 flex items-center justify-between sticky top-0 z-40">
+    <header className="h-14 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111922] px-4 lg:px-6 flex items-center justify-between sticky top-0 z-40">
       <div className="flex items-center gap-3 lg:gap-4 flex-1">
         <button
           onClick={onMobileMenuToggle}
@@ -84,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 onClick={() => setIsNotificationsOpen(false)}
               ></div>
               <div className="absolute top-full right-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-800 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 shadow-sm backdrop-blur-md">
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Notificações</h3>
                   <button
                     onClick={onMarkAllAsRead}

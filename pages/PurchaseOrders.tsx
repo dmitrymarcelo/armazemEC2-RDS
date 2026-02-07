@@ -1,12 +1,13 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { PurchaseOrder, Vendor, InventoryItem, Quote, User, PO_STATUS_LABELS, CyclicBatch, CyclicCount } from '../types';
+import { PurchaseOrder, Vendor, InventoryItem, Quote, User, PO_STATUS_LABELS, CyclicBatch, CyclicCount, Vehicle } from '../types';
 
 interface PurchaseOrdersProps {
   user: User;
   orders: PurchaseOrder[];
   vendors: Vendor[];
   inventory: InventoryItem[];
+  vehicles?: Vehicle[];
   onCreateOrder: (order: PurchaseOrder) => void;
   onAddQuotes: (poId: string, quotes: Quote[]) => void;
   onSendToApproval: (poId: string, selectedQuoteId: string) => void;
@@ -258,11 +259,15 @@ const StatusProgressBar: React.FC<{ order: PurchaseOrder }> = ({ order }) => {
 };
 
 
+// Helper to normalize strings for comparison (remove dots, dashes, etc)
+const normalize = (val: string) => (val || '').replace(/\D/g, '');
+
 export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   user,
   orders,
   vendors,
   inventory,
+  vehicles = [],
   onCreateOrder,
   onAddQuotes,
   onSendToApproval,
@@ -280,6 +285,30 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   const [quotationMode, setQuotationMode] = useState<'edit' | 'analyze'>('edit');
 
   // Form State
+  const [plate, setPlate] = useState('');
+  const [costCenter, setCostCenter] = useState('');
+  const [isPlateSearchOpen, setIsPlateSearchOpen] = useState(false);
+  const plateSearchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (plateSearchRef.current && !plateSearchRef.current.contains(event.target as Node)) {
+        setIsPlateSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredVehicles = useMemo(() => {
+    const search = plate.toLowerCase().trim();
+    if (!search || !isPlateSearchOpen) return [];
+    return vehicles
+      .filter(v => (v.plate || '').toLowerCase().includes(search) || (v.model || '').toLowerCase().includes(search))
+      .slice(0, 5);
+  }, [plate, vehicles, isPlateSearchOpen]);
+
+  // Form State
   // Rejection Modal State
   const [rejectionOrderId, setRejectionOrderId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -293,14 +322,23 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   const [quote1Price, setQuote1Price] = useState('');
   const [quote1Notes, setQuote1Notes] = useState('');
   const [quote1Valid, setQuote1Valid] = useState('');
+  const [quote1Search, setQuote1Search] = useState('');
+  const [isQuote1SearchOpen, setIsQuote1SearchOpen] = useState(false);
+
   const [quote2Vendor, setQuote2Vendor] = useState('');
   const [quote2Price, setQuote2Price] = useState('');
   const [quote2Notes, setQuote2Notes] = useState('');
   const [quote2Valid, setQuote2Valid] = useState('');
+  const [quote2Search, setQuote2Search] = useState('');
+  const [isQuote2SearchOpen, setIsQuote2SearchOpen] = useState(false);
+
   const [quote3Vendor, setQuote3Vendor] = useState('');
   const [quote3Price, setQuote3Price] = useState('');
   const [quote3Notes, setQuote3Notes] = useState('');
   const [quote3Valid, setQuote3Valid] = useState('');
+  const [quote3Search, setQuote3Search] = useState('');
+  const [isQuote3SearchOpen, setIsQuote3SearchOpen] = useState(false);
+
   const [selectedQuoteId, setSelectedQuoteId] = useState('');
 
   // Single Item Draft
@@ -311,10 +349,23 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
+  const quote1SearchRef = useRef<HTMLDivElement>(null);
+  const quote2SearchRef = useRef<HTMLDivElement>(null);
+  const quote3SearchRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
         setIsSearchDropdownOpen(false);
+      }
+      if (quote1SearchRef.current && !quote1SearchRef.current.contains(event.target as Node)) {
+        setIsQuote1SearchOpen(false);
+      }
+      if (quote2SearchRef.current && !quote2SearchRef.current.contains(event.target as Node)) {
+        setIsQuote2SearchOpen(false);
+      }
+      if (quote3SearchRef.current && !quote3SearchRef.current.contains(event.target as Node)) {
+        setIsQuote3SearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -330,7 +381,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     const search = itemSearch.toLowerCase().trim();
     if (!search) return [];
     return inventory
-      .filter(i => i.sku.toLowerCase().includes(search) || i.name.toLowerCase().includes(search))
+      .filter(i => (i.sku || '').toLowerCase().includes(search) || (i.name || '').toLowerCase().includes(search))
       .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, 8);
   }, [itemSearch, inventory]);
@@ -366,6 +417,9 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
       priority,
       total: 0,
       requester: 'Ricardo Souza (Manual)',
+      plate: plate.toUpperCase(),
+      costCenter: costCenter,
+      warehouseId: user.allowedWarehouses[0] || 'default', // NOVO: Armazém padrão do usuário
       items: itemsList.map(item => ({ ...item, price: 0 }))
     };
 
@@ -378,6 +432,8 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     setSelectedVendor('');
     setPriority('normal');
     setItemsList([]);
+    setPlate('');
+    setCostCenter('');
   };
 
   const getStatusColor = (status: PurchaseOrder['status']) => {
@@ -396,6 +452,32 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   const handleOpenQuotationModal = (order: PurchaseOrder) => {
     setQuotingPO(order);
     setQuotationMode('edit');
+
+    // Pre-fill existing quotes (Safe checks)
+    if (order.quotes) {
+      if (order.quotes[0]) {
+        setQuote1Vendor(order.quotes[0].vendorId);
+        setQuote1Search(order.quotes[0].vendorName || '');
+        setQuote1Price(order.quotes[0].totalValue.toString());
+        setQuote1Notes(order.quotes[0].notes || '');
+        setQuote1Valid(order.quotes[0].validUntil);
+      }
+      if (order.quotes[1]) {
+        setQuote2Vendor(order.quotes[1].vendorId);
+        setQuote2Search(order.quotes[1].vendorName || '');
+        setQuote2Price(order.quotes[1].totalValue.toString());
+        setQuote2Notes(order.quotes[1].notes || '');
+        setQuote2Valid(order.quotes[1].validUntil);
+      }
+      if (order.quotes[2]) {
+        setQuote3Vendor(order.quotes[2].vendorId);
+        setQuote3Search(order.quotes[2].vendorName || '');
+        setQuote3Price(order.quotes[2].totalValue.toString());
+        setQuote3Notes(order.quotes[2].notes || '');
+        setQuote3Valid(order.quotes[2].validUntil);
+      }
+    }
+
     setIsQuotationModalOpen(true);
   };
 
@@ -407,18 +489,21 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     if (order.quotes) {
       if (order.quotes[0]) {
         setQuote1Vendor(order.quotes[0].vendorId);
+        setQuote1Search(order.quotes[0].vendorName || '');
         setQuote1Price(order.quotes[0].totalValue.toString());
         setQuote1Notes(order.quotes[0].notes || '');
         setQuote1Valid(order.quotes[0].validUntil);
       }
       if (order.quotes[1]) {
         setQuote2Vendor(order.quotes[1].vendorId);
+        setQuote2Search(order.quotes[1].vendorName || '');
         setQuote2Price(order.quotes[1].totalValue.toString());
         setQuote2Notes(order.quotes[1].notes || '');
         setQuote2Valid(order.quotes[1].validUntil);
       }
       if (order.quotes[2]) {
         setQuote3Vendor(order.quotes[2].vendorId);
+        setQuote3Search(order.quotes[2].vendorName || '');
         setQuote3Price(order.quotes[2].totalValue.toString());
         setQuote3Notes(order.quotes[2].notes || '');
         setQuote3Valid(order.quotes[2].validUntil);
@@ -507,14 +592,17 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
 
   const resetQuotationForm = () => {
     setQuote1Vendor('');
+    setQuote1Search('');
     setQuote1Price('');
     setQuote1Notes('');
     setQuote1Valid('');
     setQuote2Vendor('');
+    setQuote2Search('');
     setQuote2Price('');
     setQuote2Notes('');
     setQuote2Valid('');
     setQuote3Vendor('');
+    setQuote3Search('');
     setQuote3Price('');
     setQuote3Notes('');
     setQuote3Valid('');
@@ -555,16 +643,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="8" cy="21" r="1" />
-              <circle cx="19" cy="21" r="1" />
-              <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
-              <path d="m11 10 2 2 4-4" />
-            </svg>
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Suprimentos e Aquisições</span>
-          </div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-800 dark:text-white">Pedidos de Compra</h2>
+          <h2 className="text-2xl lg:text-3xl font-black tracking-tight text-slate-800 dark:text-white">Pedidos de Compra</h2>
           <p className="text-slate-500 text-sm font-medium">Gestão de reposições automáticas e requisições manuais.</p>
         </div>
         <button
@@ -729,6 +808,59 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                     </p>
                   </div>
                 </div>
+                <div className="space-y-2 relative" ref={plateSearchRef}>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Placa do Veículo / ID</label>
+                  <input
+                    type="text"
+                    placeholder="ABC-1234"
+                    value={plate}
+                    onChange={(e) => {
+                      setPlate(e.target.value);
+                      setIsPlateSearchOpen(true);
+                    }}
+                    onFocus={() => setIsPlateSearchOpen(true)}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl text-sm font-black focus:border-primary transition-all uppercase"
+                  />
+                  {isPlateSearchOpen && filteredVehicles.length > 0 && (
+                    <div className="absolute z-[110] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1">
+                      <div className="p-2">
+                        {filteredVehicles.map(v => (
+                          <button
+                            key={v.plate}
+                            type="button"
+                            onClick={() => {
+                              console.log('🚗 Veículo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
+                              setPlate(v.plate);
+                              setCostCenter(v.costCenter || '');
+                              setIsPlateSearchOpen(false);
+                            }}
+                            className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all text-left"
+                          >
+                            <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                              <span className="material-symbols-outlined text-sm">local_shipping</span>
+                            </div>
+                            <div>
+                              <p className="text-xs font-black text-slate-800 dark:text-white uppercase">{v.plate}</p>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase">{v.model} • {v.costCenter}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Centro de Custo</label>
+                  <input
+                    type="text"
+                    placeholder="Auto via Placa"
+                    value={costCenter}
+                    onChange={(e) => setCostCenter(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl text-sm font-black focus:border-primary transition-all"
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Prioridade</label>
                   <div className="flex gap-2">
@@ -954,14 +1086,22 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
       )}
 
       {viewingOrder && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[3.5rem] shadow-2xl p-10 animate-in zoom-in-95 border border-slate-100 dark:border-slate-800 relative">
-            <div className="flex items-center justify-between mb-10">
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setViewingOrder(null);
+          }}
+        >
+          <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[3.5rem] shadow-2xl flex flex-col animate-in zoom-in-95 border border-slate-100 dark:border-slate-800 relative overflow-hidden">
+            <div className="p-10 pb-6 flex items-center justify-between flex-shrink-0">
               <div>
                 <h3 className="text-3xl font-black text-slate-800 dark:text-white tracking-tight">Detalhamento {viewingOrder.id}</h3>
                 <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-1">Gestão Completa do Fluxo de Suprimentos</p>
               </div>
-              <button onClick={() => setViewingOrder(null)} className="size-14 flex items-center justify-center bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-400 hover:text-red-500 transition-all border border-slate-100 dark:border-slate-700">
+              <button
+                onClick={() => setViewingOrder(null)}
+                className="size-14 flex items-center justify-center bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-400 hover:text-red-500 transition-all border border-slate-100 dark:border-slate-700"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18" />
                   <path d="m6 6 12 12" />
@@ -969,43 +1109,46 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
               </button>
             </div>
 
-            <StatusProgressBar order={viewingOrder} />
+            <div className="flex-1 overflow-y-auto p-10 pt-0 pb-10 space-y-8 scrollbar-hide">
+              <StatusProgressBar order={viewingOrder} />
 
-            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 scrollbar-hide">
-              {viewingOrder.items.map((item, i) => {
-                const originalImg = inventory.find(inv => inv.sku === item.sku)?.imageUrl;
-                return (
-                  <div key={i} className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-100 dark:border-slate-700 flex justify-between items-center group">
-                    <div className="flex items-center gap-5">
-                      <div className="size-16 bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-slate-100 dark:border-slate-700 flex-shrink-0 shadow-sm">
-                        <img src={originalImg} className="w-full h-full object-cover" alt="" />
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Itens do Pedido</h4>
+                {viewingOrder.items.map((item, i) => {
+                  const originalImg = inventory.find(inv => inv.sku === item.sku)?.imageUrl;
+                  return (
+                    <div key={i} className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-100 dark:border-slate-700 flex justify-between items-center group">
+                      <div className="flex items-center gap-5">
+                        <div className="size-16 bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-slate-100 dark:border-slate-700 flex-shrink-0 shadow-sm">
+                          <img src={originalImg} className="w-full h-full object-cover" alt="" />
+                        </div>
+                        <div>
+                          <p className="font-black text-slate-800 dark:text-white leading-tight">{item.name}</p>
+                          <p className="text-[10px] text-primary font-black uppercase tracking-tighter mt-1">Cód. Produto: {item.sku}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-black text-slate-800 dark:text-white leading-tight">{item.name}</p>
-                        <p className="text-[10px] text-primary font-black uppercase tracking-tighter mt-1">Cód. Produto: {item.sku}</p>
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">REQUISITADO</p>
+                        <p className="text-xl font-black text-slate-800 dark:text-white">{item.qty} un.</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">REQUISITADO</p>
-                      <p className="text-xl font-black text-slate-800 dark:text-white">{item.qty} un.</p>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+
+              <div className="p-8 bg-blue-50 dark:bg-blue-900/20 rounded-[2.5rem] border border-blue-100 dark:border-blue-800 flex items-center gap-6">
+                <svg xmlns="http://www.w3.org/2000/svg" className="size-10 text-blue-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+                <p className="text-xs font-bold text-blue-600 dark:text-blue-400 leading-relaxed">
+                  {viewingOrder.requester && viewingOrder.requester.includes('AI')
+                    ? 'Esta requisição foi gerada algoritmicamente pela LogiAI para evitar ruptura de estoque detectada.'
+                    : `Esta requisição foi gerada manualmente por Ricardo Souza via painel de suprimentos.`}
+                </p>
+              </div>
             </div>
-            <div className="mt-10 p-8 bg-blue-50 dark:bg-blue-900/20 rounded-[2.5rem] border border-blue-100 dark:border-blue-800 flex items-center gap-6">
-              <svg xmlns="http://www.w3.org/2000/svg" className="size-10 text-blue-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" />
-                <path d="M12 8h.01" />
-              </svg>
-              <p className="text-xs font-bold text-blue-600 dark:text-blue-400 leading-relaxed">
-                {viewingOrder.requester && viewingOrder.requester.includes('AI')
-                  ? 'Esta requisição foi gerada algoritmicamente pela LogiAI para evitar ruptura de estoque detectada.'
-                  : `Esta requisição foi gerada manualmente por Ricardo Souza via painel de suprimentos.`}
-              </p>
-            </div>
-            <button onClick={() => setViewingOrder(null)} className="mt-10 w-full py-6 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-3xl font-black uppercase tracking-[0.3em] shadow-2xl active:scale-95 transition-all">Fechar Detalhes</button>
           </div>
         </div>
       )}
@@ -1092,6 +1235,72 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                   ))}
                 </div>
               </div>
+
+              {/* Últimas 3 Compras Sugestivas */}
+              <div className="mt-6 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-2xl p-6 border-2 border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-2 mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-blue-600 dark:text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                  <h4 className="text-[11px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest">Últimas 3 Compras Sugestivas</h4>
+                </div>
+                <div className="space-y-3">
+                  {quotingPO.items.map((item, itemIdx) => {
+                    // Buscar últimas 3 compras deste SKU em pedidos recebidos
+                    const previousPurchases = orders
+                      .filter(po => po.status === 'recebido' && po.items.some(i => i.sku === item.sku))
+                      .slice(0, 3)
+                      .map(po => {
+                        const purchasedItem = po.items.find(i => i.sku === item.sku);
+                        return {
+                          date: po.requestDate,
+                          vendor: po.vendor,
+                          price: purchasedItem?.price || 0
+                        };
+                      });
+
+                    if (previousPurchases.length === 0) {
+                      return (
+                        <div key={itemIdx} className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-blue-100 dark:border-blue-800">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">{item.name}</p>
+                          <div className="flex items-center gap-2 text-slate-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10" />
+                              <path d="M12 16v-4" />
+                              <path d="M12 8h.01" />
+                            </svg>
+                            <span className="text-[10px] font-bold uppercase">Nenhuma compra anterior registrada</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={itemIdx} className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-blue-100 dark:border-blue-800">
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-3">{item.name}</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {previousPurchases.map((purchase, purchaseIdx) => (
+                            <div key={purchaseIdx} className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 border border-blue-100 dark:border-blue-800">
+                              <div className="flex items-center gap-1 mb-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="size-3 text-blue-600 dark:text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                                  <line x1="16" x2="16" y1="2" y2="6" />
+                                  <line x1="8" x2="8" y1="2" y2="6" />
+                                  <line x1="3" x2="21" y1="10" y2="10" />
+                                </svg>
+                                <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase">{purchase.date}</span>
+                              </div>
+                              <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-1 truncate" title={purchase.vendor}>{purchase.vendor}</p>
+                              <p className="text-sm font-black text-green-600 dark:text-green-400">R$ {purchase.price.toFixed(2)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="p-10 grid grid-cols-1 lg:grid-cols-3 gap-8 pt-2">
@@ -1107,17 +1316,50 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor *</label>
-                  <select
-                    value={quote1Vendor}
-                    onChange={e => setQuote1Vendor(e.target.value)}
+                <div className="space-y-2 relative" ref={quote1SearchRef}>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor (CNPJ ou Nome) *</label>
+                  <input
+                    type="text"
+                    value={quote1Search}
+                    onChange={(e) => {
+                      setQuote1Search(e.target.value);
+                      if (quote1Vendor) setQuote1Vendor('');
+                      setIsQuote1SearchOpen(true);
+                    }}
+                    onFocus={() => setIsQuote1SearchOpen(true)}
+                    placeholder="Digite CNPJ ou Nome..."
                     disabled={quotationMode === 'analyze'}
-                    className={`w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 rounded-xl font-bold text-sm transition-all resize-none ${quotationMode === 'analyze' ? 'border-slate-100 dark:border-slate-700 opacity-70' : 'border-amber-200 dark:border-amber-700 focus:border-amber-500'}`}
-                  >
-                    <option value="">Selecione...</option>
-                    {vendors.filter(v => v.status === 'Ativo').map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                  </select>
+                    className={`w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 rounded-xl font-bold text-sm transition-all ${quotationMode === 'analyze' ? 'border-slate-100 dark:border-slate-700 opacity-70' : 'border-amber-200 dark:border-amber-700 focus:border-amber-500'}`}
+                  />
+                  {isQuote1SearchOpen && quote1Search && !quote1Vendor && (
+                    <div className="absolute z-[110] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+                      {vendors.filter(v => {
+                        if ((v.status || '').toLowerCase() !== 'ativo') return false;
+                        const s = quote1Search.toLowerCase().trim();
+                        const sNorm = normalize(s);
+                        const vName = String(v.name || '').toLowerCase();
+                        const vCnpj = String(v.cnpj || '');
+                        const vCnpjNorm = normalize(vCnpj);
+
+                        return vName.includes(s) ||
+                          vCnpj.includes(s) ||
+                          (sNorm.length > 0 && vCnpjNorm.includes(sNorm));
+                      }).map(v => (
+                        <button
+                          key={v.id}
+                          onClick={() => {
+                            setQuote1Vendor(v.id);
+                            setQuote1Search(v.name);
+                            setIsQuote1SearchOpen(false);
+                          }}
+                          className="w-full p-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-left border-b border-slate-50 dark:border-slate-800 last:border-0"
+                        >
+                          <p className="text-sm font-black text-slate-800 dark:text-white">{v.name}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{v.cnpj}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -1134,7 +1376,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TEMPO DE ENTREGA</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prazo de Entrega</label>
                   <input
                     type="date"
                     value={quote1Valid}
@@ -1169,17 +1411,50 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor *</label>
-                  <select
-                    value={quote2Vendor}
-                    onChange={e => setQuote2Vendor(e.target.value)}
+                <div className="space-y-2 relative" ref={quote2SearchRef}>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor (CNPJ ou Nome) *</label>
+                  <input
+                    type="text"
+                    value={quote2Search}
+                    onChange={(e) => {
+                      setQuote2Search(e.target.value);
+                      if (quote2Vendor) setQuote2Vendor('');
+                      setIsQuote2SearchOpen(true);
+                    }}
+                    onFocus={() => setIsQuote2SearchOpen(true)}
+                    placeholder="Digite CNPJ ou Nome..."
                     disabled={quotationMode === 'analyze'}
                     className={`w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 rounded-xl font-bold text-sm transition-all ${quotationMode === 'analyze' ? 'border-slate-100 dark:border-slate-700 opacity-70' : 'border-orange-200 dark:border-orange-700 focus:border-orange-500'}`}
-                  >
-                    <option value="">Selecione...</option>
-                    {vendors.filter(v => v.status === 'Ativo').map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                  </select>
+                  />
+                  {isQuote2SearchOpen && quote2Search && !quote2Vendor && (
+                    <div className="absolute z-[110] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+                      {vendors.filter(v => {
+                        if ((v.status || '').toLowerCase() !== 'ativo') return false;
+                        const s = quote2Search.toLowerCase().trim();
+                        const sNorm = normalize(s);
+                        const vName = String(v.name || '').toLowerCase();
+                        const vCnpj = String(v.cnpj || '');
+                        const vCnpjNorm = normalize(vCnpj);
+
+                        return vName.includes(s) ||
+                          vCnpj.includes(s) ||
+                          (sNorm.length > 0 && vCnpjNorm.includes(sNorm));
+                      }).map(v => (
+                        <button
+                          key={v.id}
+                          onClick={() => {
+                            setQuote2Vendor(v.id);
+                            setQuote2Search(v.name);
+                            setIsQuote2SearchOpen(false);
+                          }}
+                          className="w-full p-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-left border-b border-slate-50 dark:border-slate-800 last:border-0"
+                        >
+                          <p className="text-sm font-black text-slate-800 dark:text-white">{v.name}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{v.cnpj}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -1196,7 +1471,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TEMPO DE ENTREGA</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prazo de Entrega</label>
                   <input
                     type="date"
                     value={quote2Valid}
@@ -1231,17 +1506,50 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor *</label>
-                  <select
-                    value={quote3Vendor}
-                    onChange={e => setQuote3Vendor(e.target.value)}
+                <div className="space-y-2 relative" ref={quote3SearchRef}>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fornecedor (CNPJ ou Nome) *</label>
+                  <input
+                    type="text"
+                    value={quote3Search}
+                    onChange={(e) => {
+                      setQuote3Search(e.target.value);
+                      if (quote3Vendor) setQuote3Vendor('');
+                      setIsQuote3SearchOpen(true);
+                    }}
+                    onFocus={() => setIsQuote3SearchOpen(true)}
+                    placeholder="Digite CNPJ ou Nome..."
                     disabled={quotationMode === 'analyze'}
                     className={`w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 rounded-xl font-bold text-sm transition-all ${quotationMode === 'analyze' ? 'border-slate-100 dark:border-slate-700 opacity-70' : 'border-red-200 dark:border-red-700 focus:border-red-500'}`}
-                  >
-                    <option value="">Selecione...</option>
-                    {vendors.filter(v => v.status === 'Ativo').map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                  </select>
+                  />
+                  {isQuote3SearchOpen && quote3Search && !quote3Vendor && (
+                    <div className="absolute z-[110] left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+                      {vendors.filter(v => {
+                        if ((v.status || '').toLowerCase() !== 'ativo') return false;
+                        const s = quote3Search.toLowerCase().trim();
+                        const sNorm = normalize(s);
+                        const vName = String(v.name || '').toLowerCase();
+                        const vCnpj = String(v.cnpj || '');
+                        const vCnpjNorm = normalize(vCnpj);
+
+                        return vName.includes(s) ||
+                          vCnpj.includes(s) ||
+                          (sNorm.length > 0 && vCnpjNorm.includes(sNorm));
+                      }).map(v => (
+                        <button
+                          key={v.id}
+                          onClick={() => {
+                            setQuote3Vendor(v.id);
+                            setQuote3Search(v.name);
+                            setIsQuote3SearchOpen(false);
+                          }}
+                          className="w-full p-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-left border-b border-slate-50 dark:border-slate-800 last:border-0"
+                        >
+                          <p className="text-sm font-black text-slate-800 dark:text-white">{v.name}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{v.cnpj}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">

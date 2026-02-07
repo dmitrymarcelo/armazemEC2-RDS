@@ -124,7 +124,6 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
               <h3 className="text-base font-black tracking-tight uppercase">
                 {selectedPO ? `Entrada ${selectedPO}` : 'Aguardando Seleção de PO'}
               </h3>
-              <span className="text-[10px] font-black bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded tracking-widest uppercase">DOCA 04</span>
             </div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Conferência de Carga em Tempo Real</p>
           </div>

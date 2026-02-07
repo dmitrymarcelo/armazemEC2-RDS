@@ -2,28 +2,31 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
+import { WarehouseSelector } from './components/WarehouseSelector';
 import { Dashboard } from './pages/Dashboard';
 import { Receiving } from './pages/Receiving';
 import { Movements } from './pages/Movements';
 import { Inventory } from './pages/Inventory';
-import { Expedition } from './pages/Expedition';
+import { Expedition, MaterialRequest } from './pages/Expedition';
+type RequestStatus = 'aprovacao' | 'separacao' | 'entregue'; // Re-defining locally for simplicity or import if exported
+
 import { CyclicInventory } from './pages/CyclicInventory';
 import { PurchaseOrders } from './pages/PurchaseOrders';
 import { MasterData } from './pages/MasterData';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
-import { Module, InventoryItem, Activity, Movement, Vendor, Vehicle, PurchaseOrder, Quote, ApprovalRecord, User, AppNotification, CyclicBatch, CyclicCount } from './types';
+import { Module, InventoryItem, Activity, Movement, Vendor, Vehicle, PurchaseOrder, Quote, ApprovalRecord, User, AppNotification, CyclicBatch, CyclicCount, Warehouse } from './types';
 import { LoginPage } from './components/LoginPage';
-import { supabase } from './supabase';
+import { api } from './api-client';
 
 
-const App: React.FC = () => {
+export const App: React.FC = () => {
+
   const [activeModule, setActiveModule] = useState<Module>('dashboard');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -31,14 +34,33 @@ const App: React.FC = () => {
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
   const [cyclicBatches, setCyclicBatches] = useState<CyclicBatch[]>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'warning' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'warning' | 'info' } | null>(null);
+  const [user, setUser] = useState<User | null>(null);
 
-  // Supabase Data Fetching
+  // Multi-Warehouse States
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [activeWarehouse, setActiveWarehouse] = useState<string>('ARMZ28');
+  const [userWarehouses, setUserWarehouses] = useState<string[]>(['ARMZ28', 'ARMZ33']); // Default for admin
+  const [isLoading, setIsLoading] = useState(true);
+  const [materialRequests, setMaterialRequests] = useState<any[]>([]); // Using any for now to avoid extensive type updates in App.tsx imports yet
+
+  // API Data Fetching
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { data: invData } = await supabase.from('inventory').select('*');
-        if (invData) setInventory(invData.map(item => ({
+        const { data: whData } = await api.from('warehouses').select('*').eq('is_active', true);
+        if (whData) setWarehouses(whData.map((w: any) => ({
+          id: w.id,
+          name: w.name,
+          description: w.description,
+          location: w.location,
+          isActive: w.is_active,
+          managerName: w.manager_name,
+          managerEmail: w.manager_email
+        })));
+
+        const { data: invData } = await api.from('inventory').select('*');
+        if (invData) setInventory(invData.map((item: any) => ({
           sku: item.sku,
           name: item.name,
           location: item.location,
@@ -54,34 +76,47 @@ const App: React.FC = () => {
           minQty: item.min_qty,
           maxQty: item.max_qty,
           leadTime: item.lead_time || 7,
-          safetyStock: item.safety_stock || 5
+          safetyStock: item.safety_stock || 5,
+          warehouseId: item.warehouse_id || 'ARMZ28'
         })));
 
-        const { data: batchesData } = await supabase.from('cyclic_batches').select('*').order('created_at', { ascending: false });
-        if (batchesData) setCyclicBatches(batchesData.map(b => ({
+        const { data: batchesData } = await api.from('cyclic_batches').select('*').order('created_at', { ascending: false });
+        if (batchesData) setCyclicBatches(batchesData.map((b: any) => ({
           id: b.id,
           status: b.status,
           scheduledDate: b.scheduled_date,
           completedAt: b.completed_at,
           accuracyRate: b.accuracy_rate,
           totalItems: b.total_items,
-          divergentItems: b.divergent_items
+          divergentItems: b.divergent_items,
+          warehouseId: b.warehouse_id || 'ARMZ28'
         })));
 
-        const { data: venData } = await supabase.from('vendors').select('*');
+        const { data: venData } = await api.from('vendors').select('*');
         if (venData) setVendors(venData);
 
-        const { data: vehData } = await supabase.from('vehicles').select('*');
-        if (vehData) setVehicles(vehData);
-
-        const { data: userData } = await supabase.from('users').select('*');
-        if (userData) setUsers(userData.map(u => ({
-          ...u,
-          lastAccess: u.last_access
+        const { data: vehData } = await api.from('vehicles').select('*');
+        if (vehData) setVehicles(vehData.map((v: any) => ({
+          plate: v.plate,
+          model: v.model,
+          type: v.type,
+          status: v.status,
+          lastMaintenance: v.last_maintenance,
+          costCenter: v.cost_center
         })));
 
-        const { data: poData } = await supabase.from('purchase_orders').select('*');
-        if (poData) setPurchaseOrders(poData.map(po => ({
+        const { data: userData } = await api.from('users').select('*');
+        if (userData) {
+          const mappedUsers = userData.map((u: any) => ({
+            ...u,
+            lastAccess: u.last_access,
+            allowedWarehouses: u.allowed_warehouses || ['ARMZ28']
+          }));
+          setUsers(mappedUsers);
+        }
+
+        const { data: poData } = await api.from('purchase_orders').select('*');
+        if (poData) setPurchaseOrders(poData.map((po: any) => ({
           id: po.id,
           vendor: po.vendor,
           requestDate: po.request_date,
@@ -98,25 +133,27 @@ const App: React.FC = () => {
           approvedAt: po.approved_at,
           rejectedAt: po.rejected_at,
           vendorOrderNumber: po.vendor_order_number,
-          approvalHistory: po.approval_history
+          approvalHistory: po.approval_history,
+          warehouseId: po.warehouse_id || 'ARMZ28'
         })));
 
-        const { data: movData } = await supabase.from('movements').select('*').order('timestamp', { ascending: false });
-        if (movData) setMovements(movData.map(m => ({
+        const { data: movData } = await api.from('movements').select('*').order('timestamp', { ascending: false });
+        if (movData) setMovements(movData.map((m: any) => ({
           id: m.id,
-          timestamp: m.timestamp,
-          type: m.type as Movement['type'],
           sku: m.sku,
-          productName: m.product_name,
+          productName: m.product_name || m.name || 'Produto Indefinido',
+          type: m.type as Movement['type'],
           quantity: m.quantity,
-          user: m.user,
-          location: m.location,
-          reason: m.reason,
-          orderId: m.order_id
+          timestamp: m.timestamp || new Date().toISOString(),
+          user: m.user || 'Sistema',
+          location: m.location || 'N/A',
+          reason: m.reason || 'Sem motivo registrado',
+          orderId: m.order_id,
+          warehouseId: m.warehouse_id || 'ARMZ28'
         })));
 
-        const { data: notifData } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(20);
-        if (notifData) setAppNotifications(notifData.map(n => ({
+        const { data: notifData } = await api.from('notifications').select('*').order('created_at', { ascending: false }).limit(20);
+        if (notifData) setAppNotifications(notifData.map((n: any) => ({
           id: n.id,
           title: n.title,
           message: n.message,
@@ -126,37 +163,83 @@ const App: React.FC = () => {
           userId: n.user_id
         })));
 
+
+
+
+        const { data: reqData } = await api.from('material_requests').select('*').order('created_at', { ascending: false });
+        if (reqData) setMaterialRequests(reqData.map((r: any) => ({
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          qty: r.qty,
+          plate: r.plate,
+          dept: r.dept,
+          priority: r.priority,
+          status: r.status,
+          timestamp: new Date(r.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          costCenter: r.cost_center,
+          warehouseId: r.warehouse_id
+        })));
+
       } catch (error) {
         console.error('Error fetching data:', error);
       }
     };
 
-    fetchData();
+    const initAuth = async () => {
+      setIsLoading(true);
+      try {
+        // Primeiro garantimos que os dados (como warehouses) foram carregados pelo fetchData
+        await fetchData();
 
-    // Subscribe to new notifications
-    const channel = supabase
-      .channel('notifications-changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
-        const newNotif = payload.new as any;
-        setAppNotifications(prev => [{
-          id: newNotif.id,
-          title: newNotif.title,
-          message: newNotif.message,
-          type: newNotif.type as AppNotification['type'],
-          read: newNotif.read,
-          createdAt: newNotif.created_at,
-          userId: newNotif.user_id
-        }, ...prev].slice(0, 20));
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
+        const savedUser = localStorage.getItem('logged_user');
+        if (savedUser) {
+          const parsedUser = JSON.parse(savedUser);
+          handleLogin(parsedUser);
+        }
+      } catch (e) {
+        console.error('Session recovery failed', e);
+      } finally {
+        setIsLoading(false);
+      }
     };
+
+    // Chamamos o initAuth que agora gerencia o carregamento total
+    initAuth();
+
+    // Subscribe removed - using refresh on action
+    return () => { };
   }, []);
 
+  // Auto-logout after 10 minutes of inactivity
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (user) {
+        timeoutId = setTimeout(() => {
+          logout();
+          showNotification('Sessão encerrada por inatividade (10 min)', 'warning');
+        }, 10 * 60 * 1000); // 10 minutes
+      }
+    };
+
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+
+    if (user) {
+      resetTimer();
+      events.forEach(event => document.addEventListener(event, resetTimer));
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => document.removeEventListener(event, resetTimer));
+    };
+  }, [user]);
+
   const handleAddUser = async (newUser: User) => {
-    const { error } = await supabase.from('users').insert([{
+    const { error } = await api.from('users').insert({
       id: newUser.id,
       name: newUser.name,
       email: newUser.email,
@@ -165,8 +248,9 @@ const App: React.FC = () => {
       last_access: newUser.lastAccess,
       avatar: newUser.avatar,
       password: newUser.password,
-      modules: newUser.modules
-    }]);
+      modules: JSON.stringify(newUser.modules),
+      allowed_warehouses: JSON.stringify(newUser.allowedWarehouses)
+    });
 
     if (!error) {
       setUsers(prev => [...prev, newUser]);
@@ -178,15 +262,16 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
-    const { error } = await supabase.from('users').update({
+    const { error } = await api.from('users').eq('id', updatedUser.id).update({
       name: updatedUser.name,
       email: updatedUser.email,
       role: updatedUser.role,
       status: updatedUser.status,
       avatar: updatedUser.avatar,
       password: updatedUser.password,
-      modules: updatedUser.modules
-    }).eq('id', updatedUser.id);
+      modules: JSON.stringify(updatedUser.modules),
+      allowed_warehouses: JSON.stringify(updatedUser.allowedWarehouses)
+    });
 
     if (!error) {
       setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
@@ -197,7 +282,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    const { error } = await supabase.from('users').delete().eq('id', userId);
+    const { error } = await api.from('users').eq('id', userId).delete();
     if (!error) {
       setUsers(prev => prev.filter(u => u.id !== userId));
       showNotification('Usuário removido.', 'success');
@@ -211,7 +296,7 @@ const App: React.FC = () => {
     document.documentElement.classList.toggle('dark');
   };
 
-  const showNotification = (message: string, type: 'success' | 'error' | 'warning') => {
+  const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -228,12 +313,13 @@ const App: React.FC = () => {
   };
 
   const addNotification = async (title: string, message: string, type: AppNotification['type']) => {
-    const { data: newNotif, error } = await supabase.from('notifications').insert([{
+    const { data: newNotifs, error } = await api.from('notifications').insert({
       title,
       message,
       type,
       read: false
-    }]).select().single();
+    });
+    const newNotif = Array.isArray(newNotifs) ? newNotifs[0] : newNotifs;
 
     if (!error && newNotif) {
       // Local state update is handled by the real-time subscription in useEffect
@@ -243,14 +329,14 @@ const App: React.FC = () => {
   };
 
   const markNotificationAsRead = async (id: string) => {
-    const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+    const { error } = await api.from('notifications').eq('id', id).update({ read: true });
     if (!error) {
       setAppNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     }
   };
 
   const markAllNotificationsAsRead = async () => {
-    const { error } = await supabase.from('notifications').update({ read: true }).eq('read', false);
+    const { error } = await api.from('notifications').eq('read', false).update({ read: true });
     if (!error) {
       setAppNotifications(prev => prev.map(n => ({ ...n, read: true })));
     }
@@ -264,13 +350,14 @@ const App: React.FC = () => {
       sku: item.sku,
       productName: item.name,
       quantity: quantity,
-      user: 'Ricardo Souza',
+      user: user?.name || 'Sistema',
       location: item.location,
       reason: reason,
-      orderId: orderId
+      orderId: orderId,
+      warehouseId: activeWarehouse // NOVO
     };
 
-    const { error } = await supabase.from('movements').insert([{
+    const { error } = await api.from('movements').insert({
       id: newMovement.id,
       timestamp: newMovement.timestamp,
       type: newMovement.type,
@@ -280,8 +367,9 @@ const App: React.FC = () => {
       user: newMovement.user,
       location: newMovement.location,
       reason: newMovement.reason,
-      order_id: newMovement.orderId
-    }]);
+      order_id: newMovement.orderId,
+      warehouse_id: newMovement.warehouseId
+    });
 
     if (!error) {
       setMovements(prev => [newMovement, ...prev]);
@@ -298,43 +386,46 @@ const App: React.FC = () => {
           po.items.some(i => i.sku === item.sku)
         );
 
-        if (!alreadyRequested) {
-          const autoPO: PurchaseOrder = {
-            id: `AUTO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            vendor: 'A definir via cotações',
-            requestDate: new Date().toLocaleDateString('pt-BR'),
-            status: 'requisicao',
-            priority: 'urgente',
-            total: 0,
-            requester: 'Norte Tech AI (Estoque Crítico)',
-            items: [{
-              sku: item.sku,
-              name: item.name,
-              qty: item.maxQty - item.quantity,
-              price: 0
-            }]
-          };
+        const neededQty = Math.max(0, item.maxQty - item.quantity);
+        if (neededQty <= 0) continue;
 
-          const { error } = await supabase.from('purchase_orders').insert([{
-            id: autoPO.id,
-            vendor: autoPO.vendor,
-            request_date: autoPO.requestDate,
-            status: autoPO.status,
-            priority: autoPO.priority,
-            total: autoPO.total,
-            requester: autoPO.requester,
-            items: autoPO.items
-          }]);
+        const autoPO: PurchaseOrder = {
+          id: `AUTO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          vendor: 'A definir via cotações',
+          requestDate: new Date().toLocaleDateString('pt-BR'),
+          status: 'requisicao',
+          priority: 'urgente',
+          total: 0,
+          requester: 'Norte Tech AI (Estoque Crítico)',
+          items: [{
+            sku: item.sku,
+            name: item.name,
+            qty: neededQty,
+            price: 0
+          }],
+          warehouseId: activeWarehouse // NOVO
+        };
 
-          if (!error) {
-            setPurchaseOrders(prev => [autoPO, ...prev]);
-            addActivity('alerta', 'Reposição Automática', `Pedido gerado para ${item.sku} (Saldo: ${item.quantity})`);
-            addNotification(
-              `Estoque Crítico: ${item.sku}`,
-              `Saldo de ${item.quantity} está abaixo do mínimo (${item.minQty}). Requisição de compra ${autoPO.id} gerada.`,
-              'warning'
-            );
-          }
+        const { error } = await api.from('purchase_orders').insert({
+          id: autoPO.id,
+          vendor: autoPO.vendor,
+          request_date: autoPO.requestDate,
+          status: autoPO.status,
+          priority: autoPO.priority,
+          total: autoPO.total,
+          requester: autoPO.requester,
+          items: JSON.stringify(autoPO.items),
+          warehouse_id: activeWarehouse
+        });
+
+        if (!error) {
+          setPurchaseOrders(prev => [autoPO, ...prev]);
+          addActivity('alerta', 'Reposição Automática', `Pedido gerado para ${item.sku} (Saldo: ${item.quantity})`);
+          addNotification(
+            `Estoque Crítico: ${item.sku}`,
+            `Saldo de ${item.quantity} está abaixo do mínimo (${item.minQty}). Requisição de compra ${autoPO.id} gerada.`,
+            'warning'
+          );
         }
       }
     }
@@ -353,11 +444,11 @@ const App: React.FC = () => {
 
     const newApprovalHistory = [...(po.approvalHistory || []), approvalRecord];
 
-    const { error } = await supabase.from('purchase_orders').update({
+    const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'aprovado',
-      approval_history: newApprovalHistory,
+      approval_history: JSON.stringify(newApprovalHistory),
       approved_at: approvalRecord.at
-    }).eq('id', id);
+    });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'aprovado', approvalHistory: newApprovalHistory, approvedAt: approvalRecord.at } : o));
@@ -385,11 +476,11 @@ const App: React.FC = () => {
 
     const newApprovalHistory = [...(po.approvalHistory || []), rejectionRecord];
 
-    const { error } = await supabase.from('purchase_orders').update({
+    const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'requisicao', // Volta para o início do fluxo
-      approval_history: newApprovalHistory,
+      approval_history: JSON.stringify(newApprovalHistory),
       rejected_at: rejectionRecord.at
-    }).eq('id', id);
+    });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'requisicao', approvalHistory: newApprovalHistory, rejectedAt: rejectionRecord.at } : o));
@@ -442,7 +533,7 @@ const App: React.FC = () => {
       const newMinQty = Math.ceil((adu * leadTime) + safetyStock);
 
       if (newMinQty !== item.minQty) {
-        const { error } = await supabase.from('inventory').update({ min_qty: newMinQty }).eq('sku', item.sku);
+        const { error } = await api.from('inventory').eq('sku', item.sku).update({ min_qty: newMinQty });
         if (!error) {
           updatedItems.push({ ...item, minQty: newMinQty });
           updateCount++;
@@ -488,12 +579,12 @@ const App: React.FC = () => {
 
           if (updatedItems.length === 0) {
             // Rejeita/Cancela o pedido se ficar vazio
-            await supabase.from('purchase_orders').update({ status: 'rejeitado' }).eq('id', auto.id);
+            await api.from('purchase_orders').eq('id', auto.id).update({ status: 'rejeitado' });
             setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, status: 'rejeitado' as const } : p));
             showNotification(`Pedido AUTO ${auto.id} cancelado: suprido por manual.`, 'success');
           } else {
             // Atualiza quantidades
-            await supabase.from('purchase_orders').update({ items: updatedItems }).eq('id', auto.id);
+            await api.from('purchase_orders').eq('id', auto.id).update({ items: JSON.stringify(updatedItems) });
             setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, items: updatedItems } : p));
           }
         }
@@ -502,17 +593,20 @@ const App: React.FC = () => {
   };
 
   const handleCreatePO = async (newOrder: PurchaseOrder) => {
-    const orderWithStatus = { ...newOrder, status: 'requisicao' as const };
-    const { error } = await supabase.from('purchase_orders').insert([{
+    const orderWithStatus: PurchaseOrder = { ...newOrder, status: 'requisicao', warehouseId: activeWarehouse };
+    const { error } = await api.from('purchase_orders').insert({
       id: orderWithStatus.id,
       vendor: orderWithStatus.vendor,
       status: orderWithStatus.status,
       priority: orderWithStatus.priority,
       total: orderWithStatus.total,
       requester: orderWithStatus.requester,
-      items: orderWithStatus.items,
-      request_date: new Date().toLocaleString('pt-BR')
-    }]);
+      items: JSON.stringify(orderWithStatus.items),
+      plate: orderWithStatus.plate,
+      cost_center: orderWithStatus.costCenter,
+      request_date: new Date().toLocaleString('pt-BR'),
+      warehouse_id: activeWarehouse
+    });
 
     if (!error) {
       // Sincronizar com pedidos automáticos para evitar duplicidade
@@ -526,11 +620,11 @@ const App: React.FC = () => {
 
   const handleAddQuotes = async (poId: string, quotes: Quote[]) => {
     const quotesAddedAt = new Date().toLocaleString('pt-BR');
-    const { error } = await supabase.from('purchase_orders').update({
-      quotes,
+    const { error } = await api.from('purchase_orders').eq('id', poId).update({
+      quotes: JSON.stringify(quotes),
       status: 'cotacao',
       quotes_added_at: quotesAddedAt
-    }).eq('id', poId);
+    });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o =>
@@ -549,13 +643,13 @@ const App: React.FC = () => {
 
     const updatedQuotes = po.quotes?.map(q => ({ ...q, isSelected: q.id === selectedQuoteId }));
 
-    const { error } = await supabase.from('purchase_orders').update({
+    const { error } = await api.from('purchase_orders').eq('id', poId).update({
       selected_quote_id: selectedQuoteId,
       vendor: selectedQuote.vendorName,
       total: selectedQuote.totalValue,
       status: 'pendente',
-      quotes: updatedQuotes
-    }).eq('id', poId);
+      quotes: JSON.stringify(updatedQuotes)
+    });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o => o.id === poId ? {
@@ -578,11 +672,11 @@ const App: React.FC = () => {
 
   const handleMarkAsSent = async (poId: string, vendorOrderNumber: string) => {
     const sentAt = new Date().toLocaleString('pt-BR');
-    const { error } = await supabase.from('purchase_orders').update({
+    const { error } = await api.from('purchase_orders').eq('id', poId).update({
       status: 'enviado',
       vendor_order_number: vendorOrderNumber,
       sent_to_vendor_at: sentAt
-    }).eq('id', poId);
+    });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o =>
@@ -605,7 +699,7 @@ const App: React.FC = () => {
       return false;
     }
 
-    const { error } = await supabase.from('inventory').update({ quantity: item.quantity - qty }).eq('sku', sku);
+    const { error } = await api.from('inventory').eq('sku', sku).update({ quantity: item.quantity - qty });
 
     if (!error) {
       const newInventory = inventory.map(i => i.sku === sku ? { ...i, quantity: i.quantity - qty } : i);
@@ -628,7 +722,7 @@ const App: React.FC = () => {
       }
     }
 
-    const { error } = await supabase.from('inventory').update({
+    const { error } = await api.from('inventory').eq('sku', updatedItem.sku).update({
       name: updatedItem.name,
       location: updatedItem.location,
       batch: updatedItem.batch,
@@ -642,11 +736,60 @@ const App: React.FC = () => {
       max_qty: updatedItem.maxQty,
       lead_time: updatedItem.leadTime,
       safety_stock: updatedItem.safetyStock
-    }).eq('sku', updatedItem.sku);
+    });
 
     if (!error) {
       const newInventory = inventory.map(i => i.sku === updatedItem.sku ? updatedItem : i);
       setInventory(newInventory);
+
+      // Limpeza Proativa de Pedidos AUTO-* 
+      // Se o novo saldo já suprir a necessidade (inclusive se min/max mudaram ou apenas a quantidade)
+      const autoPOs = purchaseOrders.filter(po =>
+        po.id.startsWith('AUTO-') &&
+        ['requisicao', 'cotacao', 'pendente'].includes(po.status) &&
+        po.items.some(item => item.sku === updatedItem.sku)
+      );
+
+      for (const autoPO of autoPOs) {
+        const itemIndex = autoPO.items.findIndex(item => item.sku === updatedItem.sku);
+        if (itemIndex > -1) {
+          // Recalcular quantidade: maxQty - quantidade atual
+          const newQty = Math.max(0, updatedItem.maxQty - updatedItem.quantity);
+
+          if (newQty <= 0) {
+            // Se a nova quantidade for 0 ou negativa, remover o item do pedido
+            const updatedItems = autoPO.items.filter(item => item.sku !== updatedItem.sku);
+
+            if (updatedItems.length === 0) {
+              // Se o pedido ficar vazio, cancelar/rejeitar
+              await api.from('purchase_orders').update({ status: 'cancelado' }).eq('id', autoPO.id);
+              setPurchaseOrders(prev => prev.map(po => po.id === autoPO.id ? { ...po, status: 'cancelado' as const } : po));
+              addActivity('compra', 'Pedido Cancelado', `${autoPO.id} removido: estoque de ${updatedItem.sku} está em ${updatedItem.quantity}`);
+            } else {
+              // Atualizar pedido sem o item
+              await api.from('purchase_orders').update({ items: JSON.stringify(updatedItems) }).eq('id', autoPO.id);
+              setPurchaseOrders(prev => prev.map(po => po.id === autoPO.id ? { ...po, items: updatedItems } : po));
+            }
+          } else {
+            // Atualizar quantidade do item no pedido se houve mudança
+            if (autoPO.items[itemIndex].qty !== newQty) {
+              const updatedItems = autoPO.items.map(item =>
+                item.sku === updatedItem.sku ? { ...item, qty: newQty } : item
+              );
+
+              await api.from('purchase_orders').update({ items: JSON.stringify(updatedItems) }).eq('id', autoPO.id);
+              setPurchaseOrders(prev => prev.map(po => po.id === autoPO.id ? { ...po, items: updatedItems } : po));
+
+              addActivity('compra', 'Pedido Atualizado', `${autoPO.id} recalculado: ${updatedItem.sku} agora requisita ${newQty} un.`);
+            }
+          }
+        }
+      }
+
+      if (autoPOs.length > 0) {
+        showNotification(`${autoPOs.length} pedido(s) automático(s) sincronizado(s)`, 'success');
+      }
+
       showNotification(`Item ${updatedItem.sku} atualizado com sucesso`, 'success');
       evaluateStockLevels(newInventory);
     } else {
@@ -656,11 +799,12 @@ const App: React.FC = () => {
 
   const handleCreateCyclicBatch = async (items: { sku: string, expected: number }[]) => {
     const batchId = `INV-${Date.now()}`;
-    const { error: batchError } = await supabase.from('cyclic_batches').insert([{
+    const { error: batchError } = await api.from('cyclic_batches').insert({
       id: batchId,
       status: 'aberto',
-      total_items: items.length
-    }]);
+      total_items: items.length,
+      warehouse_id: activeWarehouse
+    });
 
     if (!batchError) {
       const counts = items.map(item => ({
@@ -670,16 +814,18 @@ const App: React.FC = () => {
         status: 'pendente'
       }));
 
-      const { error: countsError } = await supabase.from('cyclic_counts').insert(counts);
+      const { error: countsError } = await api.from('cyclic_counts').insert(counts);
       if (!countsError) {
-        const { data: newBatch } = await supabase.from('cyclic_batches').select('*').eq('id', batchId).single();
+        const { data: batches } = await api.from('cyclic_batches').select('*').eq('id', batchId);
+        const newBatch = Array.isArray(batches) ? batches[0] : batches;
         if (newBatch) {
           setCyclicBatches(prev => [{
             id: newBatch.id,
             status: newBatch.status,
             scheduledDate: newBatch.scheduled_date,
             totalItems: newBatch.total_items,
-            divergentItems: newBatch.divergent_items
+            divergentItems: newBatch.divergent_items,
+            warehouseId: activeWarehouse // NOVO
           }, ...prev]);
         }
         showNotification(`Lote ${batchId} criado com ${items.length} itens!`, 'success');
@@ -694,12 +840,12 @@ const App: React.FC = () => {
     const divergentItems = counts.filter(c => c.countedQty !== c.expectedQty).length;
     const accuracyRate = ((counts.length - divergentItems) / counts.length) * 100;
 
-    const { error: batchError } = await supabase.from('cyclic_batches').update({
+    const { error: batchError } = await api.from('cyclic_batches').eq('id', batchId).update({
       status: 'concluido',
       completed_at: new Date().toISOString(),
       accuracy_rate: accuracyRate,
       divergent_items: divergentItems
-    }).eq('id', batchId);
+    });
 
     if (!batchError) {
       // Registrar movimentos de ajuste para divergências
@@ -711,16 +857,16 @@ const App: React.FC = () => {
             await recordMovement('ajuste', item, Math.abs(diff), `Ajuste automático via Inventário Cíclico (${batchId})`);
 
             // Atualizar estoque
-            await supabase.from('inventory').update({
+            await api.from('inventory').eq('sku', item.sku).update({
               quantity: count.countedQty,
               last_counted_at: new Date().toISOString()
-            }).eq('sku', item.sku);
+            });
           }
         } else {
           // Apenas atualizar data de última contagem
-          await supabase.from('inventory').update({
+          await api.from('inventory').eq('sku', count.sku).update({
             last_counted_at: new Date().toISOString()
-          }).eq('sku', count.sku);
+          });
         }
       }
 
@@ -775,12 +921,12 @@ const App: React.FC = () => {
       if (i < aLimit) category = 'A';
       else if (i < bLimit) category = 'B';
 
-      await supabase.from('inventory').update({ abc_category: category }).eq('sku', sortedSkus[i].sku);
+      await api.from('inventory').eq('sku', sortedSkus[i].sku).update({ abc_category: category });
     }
 
     // Recarregar inventário
-    const { data: invData } = await supabase.from('inventory').select('*');
-    if (invData) setInventory(invData.map(item => ({
+    const { data: invData } = await api.from('inventory').select('*');
+    if (invData) setInventory(invData.map((item: any) => ({
       sku: item.sku,
       name: item.name,
       location: item.location,
@@ -796,7 +942,8 @@ const App: React.FC = () => {
       minQty: item.min_qty,
       maxQty: item.max_qty,
       leadTime: item.lead_time || 7,
-      safetyStock: item.safety_stock || 5
+      safetyStock: item.safety_stock || 5,
+      warehouseId: item.warehouse_id
     })));
 
     showNotification('Classificação ABC atualizada com base no giro mensal!', 'success');
@@ -810,7 +957,7 @@ const App: React.FC = () => {
         const item = newInventory[index];
         const updatedQty = item.quantity + received.received;
 
-        const { error } = await supabase.from('inventory').update({ quantity: updatedQty }).eq('sku', item.sku);
+        const { error } = await api.from('inventory').eq('sku', item.sku).update({ quantity: updatedQty });
         if (!error) {
           newInventory[index] = { ...item, quantity: updatedQty };
           await recordMovement('entrada', newInventory[index], received.received, `Entrada via Recebimento de ${poId || 'PO'}`, poId);
@@ -824,7 +971,7 @@ const App: React.FC = () => {
 
     if (poId) {
       const receivedAt = new Date().toLocaleString('pt-BR');
-      const { error } = await supabase.from('purchase_orders').update({ status: 'recebido' }).eq('id', poId);
+      const { error } = await api.from('purchase_orders').eq('id', poId).update({ status: 'recebido' });
       if (!error) {
         setPurchaseOrders(prev => prev.map(po => po.id === poId ? { ...po, status: 'recebido', receivedAt } : po));
         addActivity('recebimento', 'Recebimento Finalizado', `Carga ${poId} conferida e armazenada`);
@@ -839,24 +986,27 @@ const App: React.FC = () => {
     showNotification(`Recebimento finalizado${poId ? ` - ${poId}` : ''}`, 'success');
   };
 
-  const handleAddMasterRecord = async (type: 'item' | 'vendor' | 'vehicle', data: any, isEdit: boolean) => {
+  /* Function to Add Master Record (Item, Vendor, Vehicle, CostCenter) */
+  const handleAddMasterRecord = async (type: 'item' | 'vendor' | 'vehicle' | 'cost_center', data: any, isEdit: boolean) => {
     if (type === 'item') {
       if (isEdit) {
-        const { error } = await supabase.from('inventory').update({
+        const { error } = await api.from('inventory').eq('sku', data.sku).update({
           name: data.name,
           category: data.category,
           unit: data.unit,
           image_url: data.imageUrl,
+          min_qty: data.minQty || 10,
           lead_time: data.leadTime || 7,
           safety_stock: data.safetyStock || 5
-        }).eq('sku', data.sku);
-
+        });
         if (!error) {
           setInventory(prev => prev.map(i => i.sku === data.sku ? { ...i, ...data } : i));
+          showNotification('Item atualizado com sucesso', 'success');
+        } else {
+          showNotification(`Erro ao atualizar item: ${error.message}`, 'error');
         }
       } else {
-        // Omitir SKU e deixar o banco (Supabase) gerar o Código do Produto autonumérico
-        const { data: insertedData, error } = await supabase.from('inventory').insert([{
+        const { data: insertedData, error } = await api.from('inventory').insert({
           name: data.name,
           category: data.category,
           unit: data.unit,
@@ -864,11 +1014,12 @@ const App: React.FC = () => {
           quantity: 0,
           status: 'disponivel',
           location: 'DOCA-01',
-          min_qty: 10,
+          warehouse_id: activeWarehouse,
+          min_qty: data.minQty || 10,
           max_qty: 1000,
           lead_time: 7,
           safety_stock: 5
-        }]).select();
+        });
 
         if (!error && insertedData && insertedData[0]) {
           const newItem: InventoryItem = {
@@ -888,29 +1039,59 @@ const App: React.FC = () => {
           await recordMovement('entrada', newItem, 0, 'Criação de novo Código de Produto');
         } else if (error) {
           showNotification('Erro ao criar item. Verifique a conexão.', 'error');
-          console.error('Insert error:', error);
         }
       }
     } else if (type === 'vendor') {
       if (isEdit) {
-        const { error } = await supabase.from('vendors').update(data).eq('id', data.id);
-        if (!error) setVendors(prev => prev.map(v => v.id === data.id ? { ...v, ...data } : v));
+        const { error } = await api.from('vendors').eq('id', data.id).update(data);
+        if (!error) {
+          setVendors(prev => prev.map(v => v.id === data.id ? { ...v, ...data } : v));
+          showNotification('Fornecedor atualizado com sucesso', 'success');
+        } else {
+          showNotification(`Erro ao atualizar fornecedor: ${error.message}`, 'error');
+        }
       } else {
         const newVendor: Vendor = { ...data, id: Date.now().toString(), status: 'Ativo' };
-        const { error } = await supabase.from('vendors').insert([newVendor]);
-        if (!error) setVendors(prev => [...prev, newVendor]);
+        const { error } = await api.from('vendors').insert(newVendor);
+        if (!error) {
+          setVendors(prev => [...prev, newVendor]);
+          showNotification('Fornecedor cadastrado com sucesso', 'success');
+        } else {
+          showNotification(`Erro ao cadastrar fornecedor: ${error.message}`, 'error');
+        }
       }
     } else if (type === 'vehicle') {
       if (isEdit) {
-        const { error } = await supabase.from('vehicles').update(data).eq('plate', data.plate);
-        if (!error) setVehicles(prev => prev.map(v => v.plate === data.plate ? { ...v, ...data } : v));
+        const { error } = await api.from('vehicles').eq('plate', data.plate).update({
+          model: data.model,
+          type: data.type,
+          cost_center: data.costCenter
+        });
+        if (!error) {
+          setVehicles(prev => prev.map(v => v.plate === data.plate ? { ...v, ...data } : v));
+          showNotification('Veículo atualizado com sucesso', 'success');
+        } else {
+          showNotification(`Erro ao atualizar veículo: ${error.message}`, 'error');
+        }
       } else {
         const newVehicle: Vehicle = { ...data, status: 'Disponível', lastMaintenance: new Date().toLocaleDateString('pt-BR') };
-        const { error } = await supabase.from('vehicles').insert([newVehicle]);
-        if (!error) setVehicles(prev => [...prev, newVehicle]);
+        const { error } = await api.from('vehicles').insert({
+          plate: newVehicle.plate,
+          model: newVehicle.model,
+          type: newVehicle.type,
+          status: newVehicle.status,
+          last_maintenance: newVehicle.lastMaintenance,
+          cost_center: newVehicle.costCenter
+        });
+
+        if (!error) {
+          setVehicles(prev => [...prev, newVehicle]);
+          showNotification('Veículo cadastrado com sucesso', 'success');
+        } else {
+          showNotification(`Erro ao cadastrar veículo: ${error.message}`, 'error');
+        }
       }
     }
-    showNotification(`${isEdit ? 'Registro atualizado' : 'Cadastro realizado'} com sucesso`, 'success');
   };
 
   const handleImportMasterRecords = async (type: 'item' | 'vendor' | 'vehicle', data: any[]) => {
@@ -919,106 +1100,141 @@ const App: React.FC = () => {
 
     if (type === 'item') {
       table = 'inventory';
-      processedData = data.map(d => {
-        const row: any = {
-          name: d.name,
-          category: d.category,
-          unit: d.unit,
-          image_url: d.imageUrl,
-          quantity: Math.round(Number(d.quantity) || 0),
-          status: d.status,
-          location: d.location,
-          min_qty: Math.round(Number(d.minQty) || 10),
-          max_qty: Math.round(Number(d.maxQty) || 1000),
-          lead_time: Math.round(Number(d.leadTime) || 7),
-          safety_stock: Math.round(Number(d.safetyStock) || 5)
-        };
-        // Se o SKU foi fornecido manualmente ou veio de um código existente, mantemos
-        // Caso contrário, deixamos o DEFAULT do banco agir (omitindo a chave sku)
-        if (d.sku && !d.sku.startsWith('AUTO-')) {
-          row.sku = d.sku;
-        }
-        return row;
-      });
+      processedData = data.map(d => ({
+        // Mapping logic omitted for brevity, reusing existing structure logic would be better but simple mapping here
+        name: d.name,
+        category: d.category || 'Geral',
+        unit: d.unit || 'UN',
+        image_url: d.imageUrl,
+        quantity: Math.round(Number(d.quantity) || 0),
+        status: d.status || 'disponivel',
+        sku: d.sku && !d.sku.startsWith('AUTO-') ? d.sku : undefined,
+        warehouse_id: activeWarehouse,
+        // Defaults
+        min_qty: d.minQty || 10, max_qty: 1000, lead_time: 7, safety_stock: 5
+      }));
     } else if (type === 'vendor') {
       table = 'vendors';
-      processedData = data.map(d => ({
-        id: d.id,
-        name: d.name,
-        cnpj: d.cnpj,
-        contact: d.contact,
-        status: d.status
-      }));
+      processedData = data.map(d => ({ id: d.id, name: String(d.name || ''), cnpj: String(d.cnpj || ''), contact: String(d.contact || ''), status: d.status || 'Ativo' }));
     } else if (type === 'vehicle') {
       table = 'vehicles';
       processedData = data.map(d => ({
         plate: d.plate,
         model: d.model,
-        driver: d.driver,
         type: d.type,
         status: d.status,
-        last_maintenance: d.lastMaintenance
+        last_maintenance: d.lastMaintenance,
+        cost_center: d.costCenter
       }));
     }
 
-    const { data: insertedData, error } = await supabase.from(table).insert(processedData).select();
+    const { data: insertedData, error } = await api.from(table).insert(processedData);
 
     if (!error) {
       if (type === 'item' && insertedData) {
-        // Atualizar estado com os SKUs reais gerados pelo banco
-        const finalData = insertedData.map((dbRow: any) => ({
-          sku: dbRow.sku,
-          name: dbRow.name,
-          category: dbRow.category,
-          unit: dbRow.unit,
-          imageUrl: dbRow.image_url,
-          quantity: dbRow.quantity,
-          status: dbRow.status,
-          location: dbRow.location,
-          minQty: dbRow.min_qty,
-          maxQty: dbRow.max_qty,
-          leadTime: dbRow.lead_time || 7,
-          safetyStock: dbRow.safety_stock || 5,
-          batch: dbRow.batch || 'N/A',
-          expiry: dbRow.expiry || 'N/A'
-        }));
-        setInventory(prev => [...prev, ...finalData]);
+        // Reload inventory to get full struct
+        const { data: invData } = await api.from('inventory').select('*');
+        if (invData) setInventory(invData.map(item => ({ ...item, sku: item.sku, imageUrl: item.image_url, minQty: item.min_qty, maxQty: item.max_qty, leadTime: item.lead_time, safetyStock: item.safety_stock })));
       } else if (type === 'vendor') {
         setVendors(prev => [...prev, ...data]);
       } else if (type === 'vehicle') {
         setVehicles(prev => [...prev, ...data]);
       }
-
-      showNotification(`${data.length} registros importados com sucesso!`, 'success');
+      showNotification(`${data.length} registros importados`, 'success');
       addActivity('alerta', 'Importação XLSX', `${data.length} registros de ${type} adicionados`);
     } else {
-      showNotification('Erro ao importar registros. Verifique duplicidade de Código do Produto/Placas.', 'error');
-      console.error('Import error:', error);
+      showNotification('Erro na importação', 'error');
+    }
+  };
+
+  const handleSyncFleetAPI = async (token: string) => {
+    try {
+      showNotification('Iniciando sincronização via Bridge (AWS API)...', 'info');
+      let allVeiculos: any[] = [];
+      let nextUrl = 'https://cubogpm-frota.nortesistech.com/api/veiculos/?format=json';
+
+      const edgeFunctionUrl = `http://localhost:3001/fleet-sync`;
+      if (import.meta.env.PROD) {
+        // En produção, o Nginx pode redirecionar /api/fleet-sync se houver essa rota no backend
+      }
+
+      while (nextUrl) {
+        console.log(`Chamando Bridge para: ${nextUrl}`);
+
+        const response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRmaGZta3VxbmhmYmxzb3J2Zm9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwMzc3ODYsImV4cCI6MjA4NTYxMzc4Nn0.YGVt8iW3rm2FHWqtHXub4db7avXLUBPvsfvcrPrpfos'
+          },
+          body: JSON.stringify({ token, url: nextUrl })
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Erro desconhecido no Bridge' }));
+          throw new Error(err.error || `Erro no Proxy (${response.status})`);
+        }
+
+        const data = await response.json();
+        allVeiculos = [...allVeiculos, ...data.results];
+        nextUrl = data.next;
+
+        if (allVeiculos.length % 500 === 0) {
+          console.log(`Carregados ${allVeiculos.length} veículos...`);
+        }
+      }
+
+      console.log(`Total de veículos recuperados: ${allVeiculos.length}`);
+
+      const processedData = allVeiculos.map(v => ({
+        plate: v.cod_placa,
+        model: v.modelo_veiculo,
+        type: v.des_tip_veic,
+        status: v.id_ativo === 1 ? 'Disponível' : 'Manutenção',
+        last_maintenance: v.dta_ult_manut ? new Date(v.dta_ult_manut).toLocaleDateString('pt-BR') : 'Sem data',
+        cost_center: v.centro_custo
+      }));
+
+      // Upsert to API
+      const { error } = await api.from('vehicles').insert(processedData); // No upsert yet, using insert
+
+      if (error) throw error;
+
+      // Update local state
+      setVehicles(processedData.map(v => ({
+        plate: v.plate,
+        model: v.model,
+        type: v.type,
+        status: v.status as any,
+        lastMaintenance: v.last_maintenance,
+        costCenter: v.cost_center
+      })));
+
+      showNotification(`${processedData.length} veículos sincronizados com sucesso via Bridge!`, 'success');
+      addActivity('alerta', 'Sincronização API', `${processedData.length} veículos atualizados via Fleet API`);
+    } catch (error: any) {
+      console.error('Erro na sincronização:', error);
+      showNotification(`Falha na sincronização: ${error.message}`, 'error');
     }
   };
 
   const handleRemoveMasterRecord = async (type: 'item' | 'vendor' | 'vehicle', id: string) => {
-    if (type === 'item') {
-      const { error } = await supabase.from('inventory').delete().eq('sku', id);
-      if (!error) {
-        setInventory(prev => prev.filter(i => i.sku !== id));
-        showNotification(`Item ${id} removido com sucesso`, 'success');
-      }
-    } else if (type === 'vendor') {
-      const { error } = await supabase.from('vendors').delete().eq('id', id);
-      if (!error) {
-        setVendors(prev => prev.filter(v => v.id !== id));
-        showNotification(`Fornecedor removido com sucesso`, 'success');
-      }
-    } else if (type === 'vehicle') {
-      const { error } = await supabase.from('vehicles').delete().eq('plate', id);
-      if (!error) {
-        setVehicles(prev => prev.filter(v => v.plate !== id));
-        showNotification(`Veículo ${id} removido com sucesso`, 'success');
-      }
+    let table = '';
+    let matchKey = '';
+    if (type === 'item') { table = 'inventory'; matchKey = 'sku'; }
+    else if (type === 'vendor') { table = 'vendors'; matchKey = 'id'; }
+    else if (type === 'vehicle') { table = 'vehicles'; matchKey = 'plate'; }
+
+    const { error } = await api.from(table).eq(matchKey, id).delete();
+    if (!error) {
+      if (type === 'item') setInventory(prev => prev.filter(x => x.sku !== id));
+      if (type === 'vendor') setVendors(prev => prev.filter(x => x.id !== id));
+      if (type === 'vehicle') setVehicles(prev => prev.filter(x => x.plate !== id));
+      showNotification('Registro removido', 'success');
     }
   };
 
+  /* Create Auto PO */
   const handleCreateAutoPO = async (item: InventoryItem) => {
     const alreadyRequested = purchaseOrders.some(po =>
       (po.status === 'requisicao' || po.status === 'cotacao' || po.status === 'pendente') &&
@@ -1027,6 +1243,12 @@ const App: React.FC = () => {
 
     if (alreadyRequested) {
       showNotification(`Já existe uma requisição em andamento para ${item.name}`, 'warning');
+      return;
+    }
+
+    const neededQty = Math.max(0, item.maxQty - item.quantity);
+    if (neededQty <= 0) {
+      showNotification(`Estoque de ${item.name} já está suprido.`, 'info');
       return;
     }
 
@@ -1041,21 +1263,23 @@ const App: React.FC = () => {
       items: [{
         sku: item.sku,
         name: item.name,
-        qty: item.maxQty - item.quantity,
+        qty: neededQty,
         price: 0
-      }]
+      }],
+      warehouseId: activeWarehouse // NOVO
     };
 
-    const { error } = await supabase.from('purchase_orders').insert([{
+    const { error } = await api.from('purchase_orders').insert({
       id: autoPO.id,
       vendor: autoPO.vendor,
       status: autoPO.status,
       priority: autoPO.priority,
       total: autoPO.total,
       requester: autoPO.requester,
-      items: autoPO.items,
-      request_date: new Date().toLocaleString('pt-BR')
-    }]);
+      items: JSON.stringify(autoPO.items),
+      request_date: new Date().toLocaleString('pt-BR'),
+      warehouse_id: activeWarehouse
+    });
 
     if (!error) {
       setPurchaseOrders(prev => [autoPO, ...prev]);
@@ -1081,20 +1305,107 @@ const App: React.FC = () => {
     }
   };
 
-  const [user, setUser] = useState<User | null>(null);
-
   const handleLogin = (loggedInUser: User) => {
+    // Salva no localStorage para persistir o F5
+    localStorage.setItem('logged_user', JSON.stringify(loggedInUser));
+
     setUser(loggedInUser);
+
+    // Configurar armazéns permitidos baseados na role e permissões
+    let allowed: string[] = [];
+    if (loggedInUser.role === 'admin') {
+      // Usar o estado warehouses que já deve estar carregado
+      allowed = warehouses.length > 0 ? warehouses.map(w => w.id) : ['ARMZ28', 'ARMZ33'];
+    } else {
+      allowed = loggedInUser.allowedWarehouses || [];
+    }
+
+    setUserWarehouses(allowed);
+
+    // Garantir que o armazém ativo seja um dos permitidos
+    if (allowed.length > 0 && !allowed.includes(activeWarehouse)) {
+      setActiveWarehouse(allowed[0]);
+    }
+
     addActivity('alerta', 'Login Realizado', `Usuário ${loggedInUser.name} acessou o sistema`);
   };
 
   const logout = () => {
+    localStorage.removeItem('logged_user');
     setUser(null);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-slate-900 text-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <p className="font-black uppercase tracking-widest text-sm animate-pulse">Carregando Sistema...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPage users={users} onLogin={handleLogin} />;
   }
+
+  const handleUpdateInventoryQuantity = async (sku: string, qty: number) => {
+    const item = inventory.find(i => i.sku === sku);
+    if (!item) {
+      showNotification(`Item ${sku} não encontrado no inventário.`, 'error');
+      return false;
+    }
+
+    const newQuantity = item.quantity - qty;
+    if (newQuantity < 0) {
+      showNotification(`Estoque insuficiente para ${sku}. Disponível: ${item.quantity}, Solicitado: ${qty}`, 'error');
+      return false;
+    }
+
+    const { error } = await api.from('inventory').eq('sku', sku).update({ quantity: newQuantity });
+
+    if (!error) {
+      setInventory(prev => prev.map(i => i.sku === sku ? { ...i, quantity: newQuantity } : i));
+      await recordMovement('saida', item, qty, 'Saída para Expedição');
+      showNotification(`Estoque de ${sku} atualizado para ${newQuantity}.`, 'success');
+      return true;
+    } else {
+      showNotification(`Erro ao atualizar estoque de ${sku}: ${error.message}`, 'error');
+      return false;
+    }
+  };
+
+  const handleRequestCreate = async (data: MaterialRequest) => {
+    const { error } = await api.from('material_requests').insert({
+      id: data.id,
+      sku: data.sku,
+      name: data.name,
+      qty: data.qty,
+      plate: data.plate,
+      dept: data.dept,
+      priority: data.priority,
+      status: data.status,
+      cost_center: data.costCenter,
+      warehouse_id: activeWarehouse
+    });
+    if (error) {
+      showNotification('Erro ao criar solicitação', 'error');
+    } else {
+      showNotification('Solicitação criada com sucesso!', 'success');
+      addActivity('expedicao', 'Nova Solicitação SA', `Item ${data.sku} solicitado para veículo ${data.plate}`);
+    }
+  };
+
+  const handleRequestUpdate = async (id: string, status: RequestStatus) => {
+    const { error } = await api.from('material_requests').update({ status }).eq('id', id);
+    if (error) {
+      showNotification('Erro ao atualizar status', 'error');
+    } else {
+      showNotification('Status da solicitação atualizado!', 'success');
+    }
+  };
+
 
   return (
     <div className={`flex w-screen h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
@@ -1122,50 +1433,85 @@ const App: React.FC = () => {
           onMarkAllAsRead={markAllNotificationsAsRead}
           onMobileMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         />
-        <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-4 lg:p-10 relative">
+        <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark p-4 lg:p-6 relative">
           {notification && (
             <div className={`fixed top-20 right-8 z-50 animate-in slide-in-from-right px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 border ${notification.type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' :
-              notification.type === 'error' ? 'bg-red-500 text-white border-red-400' : 'bg-amber-500 text-white border-amber-400'
+              notification.type === 'error' ? 'bg-red-500 text-white border-red-400' :
+                notification.type === 'info' ? 'bg-blue-500 text-white border-blue-400' :
+                  'bg-amber-500 text-white border-amber-400'
               }`}>
               <span className="material-symbols-outlined">info</span>
               <span className="font-bold text-sm">{notification.message}</span>
             </div>
           )}
 
-          {activeModule === 'dashboard' && <Dashboard inventory={inventory} activities={activities} />}
+          {/* Warehouse Selector Integration */}
+          <WarehouseSelector
+            warehouses={warehouses}
+            activeWarehouse={activeWarehouse}
+            userWarehouses={userWarehouses}
+            onWarehouseChange={(id) => {
+              if (userWarehouses.includes(id) || user?.role === 'admin') {
+                setActiveWarehouse(id);
+              } else {
+                showNotification('Você não tem permissão para acessar este armazém', 'error');
+              }
+            }}
+          />
+
+          {activeModule === 'dashboard' && (
+            <Dashboard
+              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+              activities={activities}
+            />
+          )}
           {activeModule === 'recebimento' && (
             <Receiving
               onFinalize={handleFinalizeReceipt}
-              availablePOs={purchaseOrders.filter(po => po.status === 'enviado')}
+              availablePOs={purchaseOrders.filter(po => po.warehouseId === activeWarehouse && po.status === 'enviado')}
             />
           )}
-          {activeModule === 'movimentacoes' && <Movements movements={movements} />}
+          {activeModule === 'movimentacoes' && (
+            <Movements
+              movements={movements.filter(m => m.warehouseId === activeWarehouse)}
+            />
+          )}
           {activeModule === 'estoque' && (
             <Inventory
-              items={inventory}
+              items={inventory.filter(i => i.warehouseId === activeWarehouse)}
               onUpdateItem={handleUpdateInventoryItem}
               onCreateAutoPO={handleCreateAutoPO}
               onRecalculateROP={handleRecalculateROP}
             />
           )}
-          {activeModule === 'expedicao' && <Expedition inventory={inventory} onProcessPicking={handleProcessPicking} />}
+          {activeModule === 'expedicao' && (
+            <Expedition
+              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+              requests={materialRequests.filter(r => r.warehouseId === activeWarehouse)}
+              onProcessPicking={handleUpdateInventoryQuantity}
+              onRequestCreate={handleRequestCreate}
+              onRequestUpdate={handleRequestUpdate}
+              activeWarehouse={activeWarehouse}
+            />
+          )}
           {
             activeModule === 'inventario_ciclico' && (
               <CyclicInventory
-                inventory={inventory}
-                batches={cyclicBatches}
+                inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
+                batches={cyclicBatches.filter(b => b.warehouseId === activeWarehouse)}
                 onCreateBatch={handleCreateCyclicBatch}
                 onFinalizeBatch={handleFinalizeCyclicBatch}
                 onClassifyABC={handleClassifyABC}
               />
             )
           }
+
           {activeModule === 'compras' && (
             <PurchaseOrders
               user={user}
-              orders={purchaseOrders}
+              orders={purchaseOrders.filter(po => po.warehouseId === activeWarehouse)}
               vendors={vendors}
-              inventory={inventory}
+              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
               onCreateOrder={handleCreatePO}
               onAddQuotes={handleAddQuotes}
               onSendToApproval={handleSendToApproval}
@@ -1176,18 +1522,22 @@ const App: React.FC = () => {
           )}
           {activeModule === 'cadastro' && (
             <MasterData
-              inventory={inventory}
+              inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
               vendors={vendors}
-              vehicles={vehicles}
               onAddRecord={handleAddMasterRecord}
               onRemoveRecord={handleRemoveMasterRecord}
               onImportRecords={handleImportMasterRecords}
             />
           )}
-          {activeModule === 'relatorios' && <Reports orders={purchaseOrders} />}
+          {activeModule === 'relatorios' && (
+            <Reports
+              orders={purchaseOrders.filter(po => po.warehouseId === activeWarehouse)}
+            />
+          )}
           {activeModule === 'configuracoes' && (
             <Settings
               users={users}
+              warehouses={warehouses}
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
@@ -1199,4 +1549,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+

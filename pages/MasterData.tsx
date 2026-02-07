@@ -7,13 +7,14 @@ type Tab = 'itens' | 'fornecedores' | 'frota';
 interface MasterDataProps {
   inventory: InventoryItem[];
   vendors: Vendor[];
-  vehicles: Vehicle[];
+  vehicles?: Vehicle[];
   onAddRecord: (type: 'item' | 'vendor' | 'vehicle', data: any, isEdit: boolean) => void;
   onRemoveRecord?: (type: 'item' | 'vendor' | 'vehicle', id: string) => void;
   onImportRecords: (type: 'item' | 'vendor' | 'vehicle', data: any[]) => void;
+  onSyncAPI?: (token: string) => void;
 }
 
-export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehicles, onAddRecord, onRemoveRecord, onImportRecords }) => {
+export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehicles = [], onAddRecord, onRemoveRecord, onImportRecords, onSyncAPI }) => {
   const [activeTab, setActiveTab] = useState<Tab>('itens');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -34,14 +35,25 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const type = activeTab === 'itens' ? 'item' : activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
+    const type = activeTab === 'itens' ? 'item' :
+      activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
     onAddRecord(type as any, formData, isEditing);
     setIsModalOpen(false);
   };
 
+  const handleSyncAPI = () => {
+    const savedToken = localStorage.getItem('fleet_api_token') || '42eee9fe816a9a49c7edcc909eba561db2ea23dc'; // Default to user's provided token for convenience
+    const token = window.prompt('Informe o Token da Fleet API:', savedToken);
+    if (token && onSyncAPI) {
+      localStorage.setItem('fleet_api_token', token);
+      onSyncAPI(token);
+    }
+  };
+
   const handleDelete = (id: string) => {
     if (onRemoveRecord) {
-      const type = activeTab === 'itens' ? 'item' : activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
+      const type = activeTab === 'itens' ? 'item' :
+        activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
       if (confirm('Tem certeza que deseja excluir este registro?')) {
         onRemoveRecord(type, id);
       }
@@ -53,13 +65,13 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
     let fileName = '';
 
     if (activeTab === 'itens') {
-      headers = ['Nome', 'Unidade de Medida', 'Quantidade'];
+      headers = ['Nome', 'Unidade de Medida', 'Quantidade', 'Quantidade Mínima'];
       fileName = 'template_itens_logiwms.xlsx';
     } else if (activeTab === 'fornecedores') {
       headers = ['NOME', 'CNPJ', 'CONTATO', 'STATUS'];
       fileName = 'template_fornecedores_logiwms.xlsx';
     } else if (activeTab === 'frota') {
-      headers = ['PLACA', 'MODELO', 'MOTORISTA', 'TIPO'];
+      headers = ['PLACA', 'MODELO', 'TIPO', 'CENTRO_CUSTO'];
       fileName = 'template_frota_logiwms.xlsx';
     }
 
@@ -81,25 +93,29 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
 
-      if (data.length === 0) return;
+      const findKey = (row: any, ...keys: string[]) => {
+        const rowKeys = Object.keys(row);
+        for (const k of keys) {
+          const found = rowKeys.find(rk => rk.toLowerCase().trim() === k.toLowerCase());
+          if (found) return row[found];
+        }
+        return undefined;
+      };
 
       let mappedData: any[] = [];
       const type = activeTab === 'itens' ? 'item' : activeTab === 'fornecedores' ? 'vendor' : 'vehicle';
 
       if (activeTab === 'itens') {
         mappedData = data.map((row: any) => {
-          // O SKU será gerado automaticamente pelo Supabase se omitido
-          const sku = '';
-
           return {
-            sku: sku,
-            name: row['Nome'] || 'Produto Sem Nome',
-            unit: row['Unidade de Medida'] || 'UN',
-            category: 'Geral', // Categoria padrão caso não venha no Excel
-            quantity: Math.round(Number(row['Quantidade']) || 0),
-            minQty: 10,  // Valor padrão
-            maxQty: 1000, // Valor padrão
-            imageUrl: 'https://images.unsplash.com/photo-1553413077-190dd305871c?w=400&q=80',
+            sku: '',
+            name: findKey(row, 'Nome', 'NOME', 'PRODUTO', 'DESCRICAO') || 'Produto Sem Nome',
+            unit: findKey(row, 'Unidade de Medida', 'UNIDADE', 'UN', 'UNIT') || 'UN',
+            category: findKey(row, 'Categoria', 'CATEGORIA') || 'Geral',
+            quantity: Math.round(Number(findKey(row, 'Quantidade', 'QTD', 'QUANTIDADE')) || 0),
+            minQty: Math.round(Number(findKey(row, 'Quantidade Mínima', 'QTD_MIN', 'MIN_QTY')) || 10),
+            maxQty: 1000,
+            imageUrl: findKey(row, 'Imagem', 'URL', 'IMAGE') || 'https://images.unsplash.com/photo-1553413077-190dd305871c?w=400&q=80',
             status: 'disponivel',
             batch: 'N/A',
             expiry: 'N/A',
@@ -108,20 +124,20 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
         });
       } else if (activeTab === 'fornecedores') {
         mappedData = data.map((row: any) => ({
-          name: row['NOME'],
-          cnpj: row['CNPJ'],
-          contact: row['CONTATO'],
-          status: row['STATUS'] || 'Ativo',
+          name: findKey(row, 'NOME', 'RAZAO SOCIAL', 'NOME FANTASIA') || 'Fornecedor Sem Nome',
+          cnpj: findKey(row, 'CNPJ', 'DOCUMENTO', 'ID') || '',
+          contact: findKey(row, 'CONTATO', 'RESPONSAVEL', 'EMAIL') || '',
+          status: findKey(row, 'STATUS', 'SITUACAO') || 'Ativo',
           id: `VEN-${Date.now()}-${Math.floor(Math.random() * 1000)}`
         }));
       } else if (activeTab === 'frota') {
         mappedData = data.map((row: any) => ({
-          plate: row['PLACA'],
-          model: row['MODELO'],
-          driver: row['MOTORISTA'],
-          type: row['TIPO'] || 'Truck',
+          plate: findKey(row, 'PLACA', 'VEICULO') || '',
+          model: findKey(row, 'MODELO', 'MARCA') || '',
+          type: findKey(row, 'TIPO', 'CATEGORIA') || 'Truck',
           status: 'Disponível',
-          lastMaintenance: new Date().toLocaleDateString('pt-BR')
+          lastMaintenance: new Date().toLocaleDateString('pt-BR'),
+          costCenter: findKey(row, 'CENTRO_CUSTO', 'CENTRO DE CUSTO', 'CC') || ''
         }));
       }
 
@@ -165,16 +181,8 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
     <div className="space-y-8 animate-in fade-in duration-700">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-              <ellipse cx="12" cy="5" rx="9" ry="3" />
-              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-            </svg>
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Master Data Cloud</span>
-          </div>
-          <h2 className="text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Cadastro Geral</h2>
-          <p className="text-slate-500 text-sm font-medium mt-1">Gestão centralizada de ativos, parceiros e logística de transporte.</p>
+          <h2 className="text-2xl lg:text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Cadastro Geral</h2>
+          <p className="text-slate-500 text-sm font-medium mt-1">Gestão centralizada de ativos, parceiros e logística.</p>
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -199,6 +207,18 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
             <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleImport} />
           </label>
 
+          {activeTab === 'frota' && (
+            <button
+              onClick={handleSyncAPI}
+              className="px-6 py-4 bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-indigo-500/20 hover:bg-indigo-600 transition-all active:scale-95 flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9-9a9 9 0 0 0-9 9" />
+              </svg>
+              Sincronizar API
+            </button>
+          )}
+
           <button
             onClick={() => handleOpenModal()}
             className="px-8 py-4 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-primary/25 hover:bg-blue-600 transition-all active:scale-95 flex items-center gap-2"
@@ -213,17 +233,23 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
         </div>
       </div>
 
-      <div className="flex gap-2 p-1.5 bg-slate-200/50 dark:bg-slate-800/40 rounded-2xl w-fit border border-slate-200 dark:border-slate-800">
-        {(['itens', 'fornecedores', 'frota'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-white dark:bg-slate-900 text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-              }`}
-          >
-            {tab}
-          </button>
-        ))}
+      <div className="flex gap-2 p-1.5 bg-slate-200/50 dark:bg-slate-800/40 rounded-2xl w-fit border border-slate-200 dark:border-slate-800 overflow-x-auto max-w-full">
+        {(['itens', 'fornecedores', 'frota'] as const).map((tab) => {
+          const count = tab === 'itens' ? inventory.length : tab === 'fornecedores' ? vendors.length : vehicles.length;
+          return (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 lg:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === tab ? 'bg-white dark:bg-slate-900 text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                }`}
+            >
+              {tab}
+              <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-slate-300/30 text-slate-400'}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -250,8 +276,8 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                 {activeTab === 'frota' && (
                   <>
                     <th className="px-8 py-6">Veículo / Placa</th>
-                    <th className="px-8 py-6">Motorista</th>
                     <th className="px-8 py-6">Tipo</th>
+                    <th className="px-8 py-6">Centro de Custo</th>
                     <th className="px-8 py-6 text-right">Gestão</th>
                   </>
                 )}
@@ -284,7 +310,7 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                 </tr>
               ))}
 
-              {activeTab === 'fornecedores' && vendors.map((vendor, i) => (
+              {activeTab === 'fornecedores' && vendors.map((vendor) => (
                 <tr key={vendor.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all group">
                   <td className="px-8 py-5">
                     <p className="text-sm font-black text-slate-800 dark:text-white leading-tight">{vendor.name}</p>
@@ -307,17 +333,19 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                 </tr>
               ))}
 
-              {activeTab === 'frota' && vehicles.map((v, i) => (
+              {activeTab === 'frota' && vehicles.map((v) => (
                 <tr key={v.plate} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all group">
                   <td className="px-8 py-5">
                     <p className="text-sm font-black text-slate-800 dark:text-white leading-tight">{v.plate}</p>
                     <p className="text-[10px] text-slate-400 font-bold uppercase">{v.model}</p>
                   </td>
-                  <td className="px-8 py-5 text-xs font-bold text-slate-600 dark:text-slate-400">{v.driver}</td>
                   <td className="px-8 py-5">
                     <span className="text-[10px] font-black px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 uppercase">
                       {v.type}
                     </span>
+                  </td>
+                  <td className="px-8 py-5 text-xs font-bold text-slate-600 dark:text-slate-400">
+                    {v.costCenter || '-'}
                   </td>
                   <td className="px-8 py-5 text-right">
                     <div className="flex justify-end">
@@ -334,7 +362,6 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
         </div>
       </div>
 
-      {/* Modal de Cadastro/Edição Dinâmico */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 border border-slate-100 dark:border-slate-800">
@@ -421,6 +448,10 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                         <option value="PCT">PCT - Pacote</option>
                       </select>
                     </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Quantidade Mínima (Estoque)</label>
+                      <input type="number" required value={formData.minQty || 10} onChange={e => setFormData({ ...formData, minQty: Number(e.target.value) })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-bold text-sm" />
+                    </div>
                     <div className="space-y-2 col-span-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">URL da Imagem (Ex: Unsplash)</label>
                       <input required value={formData.imageUrl || ''} onChange={e => setFormData({ ...formData, imageUrl: e.target.value })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-medium text-sm" placeholder="https://..." />
@@ -436,7 +467,7 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">CNPJ</label>
-                      <input required disabled={isEditing} value={formData.cnpj || ''} onChange={e => setFormData({ ...formData, cnpj: e.target.value })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-mono text-sm disabled:opacity-50" placeholder="00.000.000/0001-00" />
+                      <input required value={formData.cnpj || ''} onChange={e => setFormData({ ...formData, cnpj: e.target.value })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-mono text-sm" placeholder="00.000.000/0001-00" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Contato Responsável</label>
@@ -456,8 +487,13 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
                       <input required value={formData.model || ''} onChange={e => setFormData({ ...formData, model: e.target.value })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-bold text-sm" />
                     </div>
                     <div className="space-y-2 col-span-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Motorista Atribuído</label>
-                      <input required value={formData.driver || ''} onChange={e => setFormData({ ...formData, driver: e.target.value })} className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-bold text-sm" />
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Centro de Custo</label>
+                      <input
+                        value={formData.costCenter || ''}
+                        onChange={e => setFormData({ ...formData, costCenter: e.target.value })}
+                        className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl font-bold text-sm"
+                        placeholder="Ex: OFICINA, ADM..."
+                      />
                     </div>
                   </>
                 )}

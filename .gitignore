@@ -22,3 +22,33 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables (IMPORTANT: Never commit these)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# API Backend
+api-backend/node_modules/
+api-backend/dist/
+api-backend/.env
+
+# Development artifacts
+.gemini/
+brain/
+.cache/
+
+# OS files
+Thumbs.db
+
+# Package manager lock files (optional - uncomment if needed)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml

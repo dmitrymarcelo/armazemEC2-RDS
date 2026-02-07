@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LogiWMS</string>
+    <string name="title_activity_main">LogiWMS</string>
+    <string name="package_name">com.logiwms.app</string>
+    <string name="custom_url_scheme">com.logiwms.app</string>
+</resources>

@@ -24,10 +24,13 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
   const [calculatedStatus, setCalculatedStatus] = useState<InventoryItem['status']>('disponivel');
 
   const computeStatus = (qty: number, max: number, min: number, loc: string, exp: string): InventoryItem['status'] => {
-    if (loc.toUpperCase().startsWith('DOCA')) return 'transito';
-    if (qty > max) return 'excesso';
-    if (qty < min) return 'divergente';
-    if (exp.includes('2024') || exp.includes('2023')) return 'vencimento';
+    const safeLoc = (loc || '').toUpperCase();
+    const safeExp = (exp || '');
+
+    if (safeLoc.startsWith('DOCA') || safeLoc.startsWith('D')) return 'transito';
+    if (qty > (max || 1000)) return 'excesso';
+    if (qty < (min || 0)) return 'divergente';
+    if (safeExp.includes('2024') || safeExp.includes('2023')) return 'vencimento';
     return 'disponivel';
   };
 
@@ -40,10 +43,10 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
 
   const handleOpenOps = (item: InventoryItem) => {
     setSelectedItem(item);
-    setNewLocation(item.location);
-    setAdjustQty(item.quantity);
-    setMinQty(item.minQty);
-    setMaxQty(item.maxQty);
+    setNewLocation(item.location || '');
+    setAdjustQty(item.quantity || 0);
+    setMinQty(item.minQty || 0);
+    setMaxQty(item.maxQty || 1000);
     setLeadTime(item.leadTime || 7);
     setSafetyStock(item.safetyStock || 5);
     setIsOpsModalOpen(true);
@@ -69,15 +72,7 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-              <path d="m3.3 7 8.7 5 8.7-5" />
-              <path d="M12 22V12" />
-            </svg>
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Saldo Consolidado de Ativos</span>
-          </div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-800 dark:text-white">Estoque e Armazenamento</h2>
+          <h2 className="text-2xl lg:text-3xl font-black tracking-tight text-slate-800 dark:text-white">Estoque e Armazenamento</h2>
           <p className="text-slate-500 text-sm font-medium">Visualização unificada de saldos por Código de Produto no CD Manaus.</p>
         </div>
 

@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
-import { InventoryItem } from '../types';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { InventoryItem, Vehicle } from '../types';
 
 type RequestStatus = 'aprovacao' | 'separacao' | 'entregue';
 
-interface MaterialRequest {
+// Consolidated Interface
+export interface MaterialRequest {
   id: string;
   sku: string;
   name: string;
@@ -14,6 +15,8 @@ interface MaterialRequest {
   priority: 'normal' | 'alta' | 'urgente';
   status: RequestStatus;
   timestamp: string;
+  costCenter?: string;
+  warehouseId?: string;
 }
 
 interface OrderItem {
@@ -33,22 +36,48 @@ interface Order {
 
 interface ExpeditionProps {
   inventory: InventoryItem[];
+  vehicles?: Vehicle[];
   onProcessPicking: (sku: string, qty: number) => boolean;
+  requests: MaterialRequest[];
+  onRequestCreate: (data: MaterialRequest) => void;
+  onRequestUpdate: (id: string, status: RequestStatus) => void;
+  activeWarehouse: string;
 }
 
 const INITIAL_ORDERS: Order[] = [];
 
-export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPicking }) => {
+export const Expedition: React.FC<ExpeditionProps> = ({ inventory, vehicles = [], onProcessPicking, requests, onRequestCreate, onRequestUpdate, activeWarehouse }) => {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [internalRequests, setInternalRequests] = useState<MaterialRequest[]>([]);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
 
   // Form States
   const [reqSku, setReqSku] = useState('');
-  const [reqQty, setReqQty] = useState<number>(0);
+  const [reqQty, setReqQty] = useState<number | string>(''); // Start empty
   const [reqDept, setReqDept] = useState('');
   const [reqPlate, setReqPlate] = useState('');
+  const [reqCostCenter, setReqCostCenter] = useState('');
   const [reqPriority, setReqPriority] = useState<'normal' | 'alta' | 'urgente'>('normal');
+
+  const [isPlateSearchOpen, setIsPlateSearchOpen] = useState(false);
+  const plateSearchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (plateSearchRef.current && !plateSearchRef.current.contains(event.target as Node)) {
+        setIsPlateSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredVehicles = useMemo(() => {
+    const search = reqPlate.toLowerCase().trim();
+    if (!search || !isPlateSearchOpen) return [];
+    return vehicles
+      .filter(v => v.plate.toLowerCase().includes(search) || v.model.toLowerCase().includes(search))
+      .slice(0, 5);
+  }, [reqPlate, vehicles, isPlateSearchOpen]);
 
   const getStockForSku = (sku: string) => {
     return inventory
@@ -57,7 +86,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
   };
 
   const selectedItemStock = reqSku ? getStockForSku(reqSku) : 0;
-  const isInvalidRequest = reqQty > selectedItemStock || reqQty <= 0;
+  const isInvalidRequest = Number(reqQty) > selectedItemStock || Number(reqQty) <= 0;
 
   const handleStartPicking = (orderId: string) => {
     const order = orders.find(o => o.id === orderId);
@@ -78,43 +107,45 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
     e.preventDefault();
     if (isInvalidRequest) return;
 
-    // Fixed: changed invalid '2xl' value to '2-digit' for toLocaleTimeString hour/minute options
     const newRequest: MaterialRequest = {
       id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
       sku: reqSku,
       name: inventory.find(i => i.sku === reqSku)?.name || 'Produto',
-      qty: reqQty,
+      qty: Number(reqQty),
       plate: reqPlate.toUpperCase(),
       dept: reqDept,
       priority: reqPriority,
       status: 'aprovacao',
-      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      costCenter: reqCostCenter,
+      warehouseId: activeWarehouse
     };
 
-    setInternalRequests(prev => [newRequest, ...prev]);
+    onRequestCreate(newRequest);
     setIsRequestModalOpen(false);
     resetForm();
   };
 
   const resetForm = () => {
     setReqSku('');
-    setReqQty(0);
+    setReqQty('');
     setReqDept('');
     setReqPlate('');
+    setReqCostCenter('');
     setReqPriority('normal');
   };
 
   const advanceWorkflow = (requestId: string) => {
-    const request = internalRequests.find(r => r.id === requestId);
+    const request = requests.find(r => r.id === requestId);
     if (!request) return;
 
     if (request.status === 'aprovacao') {
-      setInternalRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'separacao' } : r));
+      onRequestUpdate(requestId, 'separacao');
     } else if (request.status === 'separacao') {
       // O momento da entrega é o gatilho para a baixa no estoque
       const success = onProcessPicking(request.sku, request.qty);
       if (success) {
-        setInternalRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'entregue' } : r));
+        onRequestUpdate(requestId, 'entregue');
       }
     }
   };
@@ -123,17 +154,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
     <div className="space-y-10 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
-              <path d="M15 18H9" />
-              <path d="M19 18h2a1 1 0 0 0 1-1v-4.2c0-.3-.1-.6-.3-.8l-.7-.7c-.6-.6-1.6-1-2.4-1H15" />
-              <circle cx="7" cy="18" r="2" />
-              <circle cx="17" cy="18" r="2" />
-            </svg>
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Fluxo de Saída de Cargas</span>
-          </div>
-          <h2 className="text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Solicitações SA</h2>
+          <h2 className="text-3xl lg:text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Solicitações SA</h2>
           <p className="text-slate-500 text-sm font-medium">Gestão de picking e solicitações internas com workflow de aprovação.</p>
         </div>
         <div className="flex gap-3">
@@ -153,7 +174,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
       </div>
 
       {/* Seção de Workflow Interno */}
-      {internalRequests.length > 0 && (
+      {requests.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-3 px-2">
             <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -165,7 +186,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Requisições em Fluxo Interno</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {internalRequests.map((req) => (
+            {requests.map((req) => (
               <div key={req.id} className={`bg-white dark:bg-slate-900 rounded-[2rem] border-2 ${req.status === 'entregue' ? 'border-emerald-100 opacity-60' : 'border-slate-100'} p-6 shadow-sm transition-all`}>
                 <div className="flex justify-between items-start mb-6">
                   <div>
@@ -351,7 +372,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
       {/* Modal de Nova Solicitação */}
       {isRequestModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
             <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-black tracking-tight text-slate-800 dark:text-white">Requisição de Material</h3>
@@ -393,32 +414,80 @@ export const Expedition: React.FC<ExpeditionProps> = ({ inventory, onProcessPick
                       required
                       type="number"
                       value={reqQty}
-                      onChange={(e) => setReqQty(Number(e.target.value))}
-                      className={`w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 rounded-2xl font-black text-sm transition-all ${reqQty > selectedItemStock ? 'border-red-500 text-red-500' : 'border-slate-100 dark:border-slate-700'
+                      onChange={(e) => setReqQty(e.target.value)}
+                      placeholder="0"
+                      className={`w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 rounded-2xl font-black text-sm transition-all ${Number(reqQty) > selectedItemStock ? 'border-red-500 text-red-500' : 'border-slate-100 dark:border-slate-700'
                         }`}
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 relative" ref={plateSearchRef}>
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Placa do Veículo / ID</label>
                     <input
                       required
                       placeholder="ABC-1234"
                       value={reqPlate}
-                      onChange={(e) => setReqPlate(e.target.value)}
+                      onChange={(e) => {
+                        setReqPlate(e.target.value);
+                        setIsPlateSearchOpen(true);
+                      }}
+                      onFocus={() => setIsPlateSearchOpen(true)}
                       className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-black text-sm transition-all uppercase"
                     />
+                    {isPlateSearchOpen && filteredVehicles.length > 0 && (
+                      <div className="absolute z-[110] left-0 right-0 top-full mt-2 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                        <div className="p-2">
+                          {filteredVehicles.map(v => (
+                            <button
+                              key={v.plate}
+                              type="button"
+                              onClick={() => {
+                                console.log('🚗 Veículo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
+                                setReqPlate(v.plate);
+                                setReqCostCenter(v.costCenter || '');
+                                setIsPlateSearchOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all text-left"
+                            >
+                              <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <rect x="1" y="3" width="15" height="13" />
+                                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                                  <circle cx="5.5" cy="18.5" r="2.5" />
+                                  <circle cx="18.5" cy="18.5" r="2.5" />
+                                </svg>
+                              </div>
+                              <div>
+                                <p className="text-xs font-black text-slate-800 dark:text-white uppercase">{v.plate}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">{v.model} • {v.costCenter}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Setor / Departamento Solicitante</label>
-                  <input
-                    required
-                    placeholder="Ex: Manutenção Elétrica"
-                    value={reqDept}
-                    onChange={(e) => setReqDept(e.target.value)}
-                    className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-black text-sm transition-all"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Setor / Departamento Solicitante</label>
+                    <input
+                      required
+                      placeholder="Ex: Manutenção Elétrica"
+                      value={reqDept}
+                      onChange={(e) => setReqDept(e.target.value)}
+                      className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-black text-sm transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Centro de Custo</label>
+                    <input
+                      placeholder="Automático via Placa"
+                      value={reqCostCenter}
+                      onChange={(e) => setReqCostCenter(e.target.value)}
+                      className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-black text-sm transition-all"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">

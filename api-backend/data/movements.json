@@ -1,0 +1,26 @@
+[
+  {
+    "id": "MOV-1770434413761-539",
+    "timestamp": "06/02/2026, 23:20:13",
+    "type": "saida",
+    "sku": "F-502",
+    "product_name": "Filtro de Óleo Diesel",
+    "quantity": 10,
+    "user": "Administrador",
+    "location": "B-02-05",
+    "reason": "Saída para Expedição",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "MOV-1770434416761-776",
+    "timestamp": "06/02/2026, 23:20:16",
+    "type": "saida",
+    "sku": "F-502",
+    "product_name": "Filtro de Óleo Diesel",
+    "quantity": 10,
+    "user": "Administrador",
+    "location": "B-02-05",
+    "reason": "Saída para Expedição",
+    "warehouse_id": "ARMZ28"
+  }
+]

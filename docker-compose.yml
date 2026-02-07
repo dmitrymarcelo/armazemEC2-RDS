@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: logiwms-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: logiwms
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  backend:
+    build: ./api-backend
+    container_name: logiwms-backend
+    restart: always
+    environment:
+      - PORT=3000
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgrespassword
+      - DB_NAME=logiwms
+      - DB_PORT=5432
+    ports:
+      - "3001:3000"
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  frontend:
+    build: .
+    container_name: logiwms-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
