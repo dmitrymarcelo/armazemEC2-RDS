@@ -1,7 +1,0 @@
-{
-  "name": "LogiWMS Pro - Gestão Inteligente de Armazém",
-  "description": "Um sistema de gestão de armazém (WMS) de alta performance com rastreamento de inventário em tempo real, gestão de recebimento e insights logísticos baseados em IA.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}

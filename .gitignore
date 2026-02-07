@@ -45,6 +45,14 @@ api-backend/.env
 brain/
 .cache/
 
+# Skills and submodules (not needed)
+antigravity-awesome-skills/
+
+# Test files (temporary)
+fetch_test.*
+test-*.js
+metadata.json
+
 # OS files
 Thumbs.db
 
