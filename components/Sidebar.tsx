@@ -1,5 +1,4 @@
-
-import React from 'react';
+﻿import React from 'react';
 import { Module, User } from '../types';
 
 interface SidebarProps {
@@ -12,7 +11,7 @@ interface SidebarProps {
   onMobileClose: () => void;
 }
 
-const SidebarIcon: React.FC<{ icon: string; isActive: boolean; isCollapsed: boolean }> = ({ icon, isActive, isCollapsed }) => {
+const SidebarIcon: React.FC<{ icon: string; isActive: boolean; isCollapsed: boolean }> = ({ icon, isActive }) => {
   const color = isActive ? 'currentColor' : '#94a3b8';
 
   const icons: Record<string, React.ReactNode> = {
@@ -30,6 +29,12 @@ const SidebarIcon: React.FC<{ icon: string; isActive: boolean; isCollapsed: bool
     swap_horiz: (
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M18 14l3-3m0 0l-3-3m3 3H3M6 20L3 17m0 0l3-3m-3 3h18" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+    fact_check: (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M9 11l2 2 4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4 5a2 2 0 012-2h10l4 4v12a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
     inventory_2: (
@@ -83,7 +88,7 @@ const SidebarIcon: React.FC<{ icon: string; isActive: boolean; isCollapsed: bool
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M13 17l5-5-5-5M6 17l5-5-5-5M2 12h11" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
-    )
+    ),
   };
 
   return (
@@ -98,6 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
     { id: 'dashboard', label: 'Painel', icon: 'grid_view' },
     { id: 'recebimento', label: 'Recebimento', icon: 'move_to_inbox' },
     { id: 'movimentacoes', label: 'Movimentações', icon: 'swap_horiz' },
+    { id: 'auditoria_geral', label: 'Auditoria Geral', icon: 'fact_check' },
     { id: 'estoque', label: 'Estoque', icon: 'inventory_2' },
     { id: 'expedicao', label: 'Solicitações SA', icon: 'local_shipping' },
     { id: 'inventario_ciclico', label: 'Inventário Cíclico', icon: 'published_with_changes' },
@@ -106,11 +112,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
     { id: 'relatorios', label: 'Relatórios', icon: 'bar_chart' },
   ] as const;
 
-  const filteredNavItems = navItems.filter(item => user.modules?.includes(item.id as Module));
+  const filteredNavItems = navItems.filter(
+    (item) => user.role === 'admin' || user.modules?.includes(item.id as Module)
+  );
 
   return (
     <>
-      {/* Backdrop for Mobile */}
       {isMobileOpen && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm lg:hidden animate-in fade-in duration-300"
@@ -118,22 +125,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
         ></div>
       )}
 
-      <aside className={`
+      <aside
+        className={`
         fixed inset-y-0 left-0 z-50 lg:relative lg:translate-x-0 transition-transform duration-500 ease-in-out
         ${isMobileOpen ? 'translate-x-0 flex' : '-translate-x-full lg:translate-x-0 hidden lg:flex'}
         ${isCollapsed ? 'lg:w-24' : 'lg:w-64'} w-72
         border-r border-[#dbe0e6] dark:border-[#2d3748] bg-white dark:bg-[#1a222c] flex flex-col flex-shrink-0 h-full relative overflow-hidden
-      `}>
-        {/* Toggle Button - Desktop Only */}
+      `}
+      >
         <button
           onClick={onToggle}
           className="hidden lg:flex absolute -right-0 top-6 z-50 bg-white dark:bg-[#1a222c] border border-[#dbe0e6] dark:border-[#2d3748] p-2 rounded-l-xl shadow-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-all active:scale-95 group"
-          title={isCollapsed ? "Expandir Menu" : "Recolher Menu"}
+          title={isCollapsed ? 'Expandir Menu' : 'Recolher Menu'}
         >
           <SidebarIcon icon={isCollapsed ? 'menu' : 'menu_open'} isActive={false} isCollapsed={isCollapsed} />
         </button>
 
-        {/* Close Button - Mobile Only */}
         <button
           onClick={onMobileClose}
           className="lg:hidden absolute right-4 top-4 z-50 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
@@ -144,7 +151,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
           </svg>
         </button>
 
-        {/* Header / Logo */}
         <div className={`flex flex-col items-center justify-center transition-all duration-500 ${isCollapsed ? 'lg:p-4 p-6 gap-2' : 'p-6 gap-4'}`}>
           <img
             src={`${import.meta.env.BASE_URL}norte_tech_logo.png`}
@@ -157,7 +163,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
           </div>
         </div>
 
-        {/* Navigation */}
         <nav className={`flex-1 space-y-2 overflow-y-auto no-scrollbar scroll-smooth ${isCollapsed ? 'lg:px-4 lg:py-2 px-6 py-4' : 'px-6 py-4'}`}>
           {filteredNavItems.map((item) => {
             const isActive = activeModule === item.id;
@@ -165,15 +170,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
               <button
                 key={item.id}
                 onClick={() => onModuleChange(item.id)}
-                className={`w-full group flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-3.5'} ${isActive
-                  ? 'bg-primary text-white shadow-xl shadow-primary/25'
-                  : 'text-[#617589] hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-primary'
-                  }`}
-                title={isCollapsed ? item.label : ""}
+                className={`w-full group flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-3.5'} ${
+                  isActive
+                    ? 'bg-primary text-white shadow-xl shadow-primary/25'
+                    : 'text-[#617589] hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-primary'
+                }`}
+                title={isCollapsed ? item.label : ''}
               >
                 <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'lg:justify-center lg:w-fit w-full gap-4' : 'w-full gap-4'}`}>
                   <SidebarIcon icon={item.icon} isActive={isActive} isCollapsed={isCollapsed} />
-                  <span className={`text-[11px] font-black uppercase tracking-[0.1em] flex-1 text-left whitespace-nowrap transition-all duration-300 ${isActive ? 'text-white' : 'text-inherit'} ${isCollapsed ? 'lg:hidden' : ''}`}>
+                  <span
+                    className={`text-[11px] font-black uppercase tracking-[0.1em] flex-1 text-left whitespace-nowrap transition-all duration-300 ${
+                      isActive ? 'text-white' : 'text-inherit'
+                    } ${isCollapsed ? 'lg:hidden' : ''}`}
+                  >
                     {item.label}
                   </span>
                 </div>
@@ -182,24 +192,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeModule, onModuleChange, 
           })}
         </nav>
 
-        {/* Settings Section */}
-        {user.modules?.includes('configuracoes') && (
+        {(user.role === 'admin' || user.modules?.includes('configuracoes')) && (
           <div className="mt-auto bg-slate-50/50 dark:bg-slate-800/10 p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-800 transition-all duration-500">
-          <button
-            onClick={() => onModuleChange('configuracoes')}
-            className={`w-full flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-4'} ${activeModule === 'configuracoes'
-              ? 'bg-slate-900 text-white shadow-xl'
-              : 'text-[#617589] hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
+            <button
+              onClick={() => onModuleChange('configuracoes')}
+              className={`w-full flex items-center rounded-2xl transition-all duration-300 active:scale-[0.98] ${isCollapsed ? 'lg:p-4 lg:justify-center p-4' : 'px-5 py-4'} ${
+                activeModule === 'configuracoes'
+                  ? 'bg-slate-900 text-white shadow-xl'
+                  : 'text-[#617589] hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
               }`}
-            title={isCollapsed ? "Configurações" : ""}
-          >
-            <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'lg:justify-center lg:w-fit w-full gap-4' : 'w-full gap-4'}`}>
-              <SidebarIcon icon="settings" isActive={activeModule === 'configuracoes'} isCollapsed={isCollapsed} />
-              <span className={`text-[11px] font-black uppercase tracking-[0.1em] flex-1 text-left whitespace-nowrap ${isCollapsed ? 'lg:hidden' : ''}`}>
-                Configurações
-              </span>
-            </div>
-          </button>
+              title={isCollapsed ? 'Configurações' : ''}
+            >
+              <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'lg:justify-center lg:w-fit w-full gap-4' : 'w-full gap-4'}`}>
+                <SidebarIcon icon="settings" isActive={activeModule === 'configuracoes'} isCollapsed={isCollapsed} />
+                <span className={`text-[11px] font-black uppercase tracking-[0.1em] flex-1 text-left whitespace-nowrap ${isCollapsed ? 'lg:hidden' : ''}`}>
+                  Configurações
+                </span>
+              </div>
+            </button>
           </div>
         )}
       </aside>

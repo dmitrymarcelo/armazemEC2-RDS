@@ -1,254 +1,150 @@
-﻿<div align="center">
-  
-  # �Y"� LogiWMS-Pro
-  ### Gestão Inteligente de Armazém - Sistema WMS Completo
-  
-  [![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)](https://reactjs.org/)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://www.typescriptlang.org/)
-  [![Node.js](https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js)](https://nodejs.org/)
-  [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-</div>
+# LogiWMS-Pro
 
----
+Sistema WMS completo para operacao de armazem, com frontend React + TypeScript e backend Node.js + PostgreSQL (com fallback JSON).
 
-## �Ys? Sobre o Projeto
+## Stack
+- Frontend: React, TypeScript, Vite, Recharts, XLSX
+- Backend: Node.js, Express, PostgreSQL
+- Testes:
+  - Frontend: `typecheck`
+  - Backend: testes de integracao (`node --test`)
+  - E2E: Playwright
 
-**LogiWMS-Pro** é um sistema completo de **Warehouse Management System (WMS)** desenvolvido para otimizar operações logísticas em centros de distribuição. Com foco em **usabilidade**, **segurança** e **performance**, o sistema oferece controle total sobre:
+## Requisitos
+- Node.js 18+
+- npm
+- PostgreSQL (opcional em dev; backend pode usar fallback JSON)
 
-- �Y"� **Recebimento de Mercadorias**
-- �Y"� **Gestão de Estoque** com classificação ABC
-- �Y"" **Movimentações Internas**
-- �Y"� **Expedição e Solicitações SA**
-- �Y"� **Inventário Cíclico**
-- �Y>' **Gestão de Compras** com cotações e aprovações
-- �Y"S **Relatórios Analíticos**
-- �Y'� **Controle de Usuários e Permissões**
-
----
-
-## �o� Principais Funcionalidades
-
-### �YZ� Dashboard Inteligente
-- KPIs em tempo real (volume, ocupação, alertas)
-- Gráficos de produtividade
-- Atividades recentes do sistema
-
-### �Y"� Segurança OWASP
-- Autenticação server-side
-- Sanitização automática de dados
-- Proteção contra SQL Injection
-- Whitelist de tabelas
-
-### �Y"� Interface Moderna
-- Design responsivo (desktop, tablet, mobile)
-- Dark mode nativo
-- Animações fluidas
-- Sidebar colapsável
-
-### �Y"" Persistência Híbrida
-- Suporte a PostgreSQL/SQLite
-- Fallback automático para JSON
-- Sincronização de dados
-
----
-
-## �Y>�️ Tecnologias Utilizadas
-
-### Frontend
-- **React 18.3** - Biblioteca UI
-- **TypeScript 5.6** - Tipagem estática
-- **Vite** - Build tool ultrarrápido
-- **Recharts** - Gráficos e visualizações
-- **XLSX** - Importação/exportação Excel
-
-### Backend
-- **Node.js 24.x** - Runtime JavaScript
-- **Express** - Framework web
-- **PostgreSQL** - Banco de dados principal
-- **SQLite** - Banco alternativo local
-
-### Segurança
-- **OWASP Guard** - Auditoria automática
-- **TDD Mastery** - Desenvolvimento orientado a testes
-- **Agent Manager** - Otimização de tarefas
-
----
-
-## �Y"< Pré-requisitos
-
-- **Node.js** >= 18.0.0
-- **npm** ou **yarn**
-- **PostgreSQL** (opcional - usa JSON como fallback)
-
----
-
-## �sT️ Instalação
-
-### 1. Clone o repositório
-```bash
-git clone https://github.com/seu-usuario/logiwms-pro.git
-cd logiwms-pro
-```
-
-### 2. Instale as dependências
-
-**Frontend:**
+## Instalacao
 ```bash
 npm install
-```
-
-**Backend:**
-```bash
 cd api-backend
 npm install
 cd ..
 ```
 
-### 3. Configure as variáveis de ambiente (opcional)
+## Variaveis de ambiente
+Use `.env.example` como base.
 
-Crie um arquivo `.env.local` na raiz do projeto:
-```env
-VITE_API_URL=http://localhost:3001
-GEMINI_API_KEY=sua_chave_aqui
-```
+Frontend (raiz):
+- `VITE_API_URL` (opcional)
+- `VITE_API_TIMEOUT_MS` (opcional, default `15000`)
+- `VITE_API_GET_RETRIES` (opcional, default `2`)
 
-### 4. Inicie o sistema
+Backend (`api-backend`):
+- `PORT` (default `3001`)
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+- `DB_HEALTHCHECK_INTERVAL_MS` (default `10000`)
+- `JWT_SECRET`
 
-**Terminal 1 - Backend:**
+Arquivo recomendado para backend:
+- `api-backend/.env.example`
+
+## Executar localmente
+Terminal 1 (backend):
 ```bash
 cd api-backend
-npm start
+npm run dev
 ```
 
-**Terminal 2 - Frontend:**
+Terminal 2 (frontend):
 ```bash
 npm run dev
 ```
 
-### 5. Acesse o sistema
-Abra seu navegador em: **http://localhost:3000**
+Aplicacao: `http://localhost:3000`
 
----
+Health backend: `http://localhost:3001/health`
 
-## ?? Acesso ao Sistema
-
-- Credenciais locais de teste (seed):
-  - `admin@nortetech.com` / `admin`
-  - `MATIAS@G.COM` / `matias`
-- Usu�rios podem ser ajustados no banco (`users`) ou no fallback JSON (`api-backend/data/users.json`).
-- N�o mantenha credenciais padr�o em produ��o.
-
-### Troubleshooting r�pido
-
-- Erro `Failed to fetch` na tela de login:
-  - Confirme backend ativo em `http://localhost:3001/health`
-  - Reinicie os dois servi�os:
-    - Backend: `cd api-backend && npm run dev`
-    - Frontend: `npm run dev`
-
----
-
-## �Y"� Estrutura do Projeto
-
-```
-logiwms-pro/
-�"o�"?�"? api-backend/          # Backend Node.js + Express
-�",   �"o�"?�"? data/            # Dados JSON (fallback)
-�",   �"o�"?�"? tests/           # Testes automatizados
-�",   �""�"?�"? index.js         # Servidor principal
-�"o�"?�"? components/          # Componentes React reutilizáveis
-�"o�"?�"? pages/              # Páginas/Módulos do sistema
-�"o�"?�"? public/             # Assets estáticos
-�"o�"?�"? types.ts            # Definições TypeScript
-�"o�"?�"? App.tsx             # Componente principal
-�""�"?�"? schema.sql          # Schema do banco de dados
-
-```
-
----
-
-## ?? Testes
-
+## Ativar PostgreSQL (sair do modo contingencia JSON)
+1. Suba o banco local com Docker:
 ```bash
-# Frontend (typecheck)
-npm test
+docker compose up -d db
+```
+2. Verifique conexao do backend com o banco:
+```bash
+cd api-backend
+npm run db:health
+```
+3. Aplique a migracao:
+```bash
+cd api-backend
+npm run db:migrate
+```
+4. Reinicie o backend:
+```bash
+cd api-backend
+npm run dev
+```
+5. Confirme status:
+```bash
+curl http://localhost:3001/health
+```
+Esperado no retorno:
+- `"database": "connected"`
+- `"mode": "production"`
 
-# Backend (integra��o + auth + fluxo)
+## Credenciais seed
+- `admin@nortetech.com` / `admin`
+- `MATIAS@G.COM` / `matias`
+
+## Testes
+Frontend:
+```bash
+npm run test
+```
+
+Backend:
+```bash
 cd api-backend
 npm test
+npm run db:health
+npm run db:migrate
+```
 
-# Popular massa Big Data (gera backup autom�tico em api-backend/data-backups/)
+E2E:
+```bash
+npm run e2e
+```
+
+## Scripts de dados e carga
+Em `api-backend`:
+```bash
 npm run seed:bigdata
-
-# Stress test automatizado (login, leitura, escrita e fluxo misto)
+npm run seed:bigdata:xlarge
 npm run test:stress
 ```
 
----
+## Banco de dados
+- `schema.sql`: schema base recomendado para ambientes novos
+- `migration.sql`: migracao idempotente para ambientes existentes, com:
+  - conversao segura para `TIMESTAMPTZ`
+  - conversao segura para `JSONB`
+  - indices operacionais e GIN
 
-## �Ys� Deploy
+## Auditoria central
+O sistema possui trilha de auditoria unificada em:
+- PostgreSQL: tabela `audit_logs`
+- Modo contingencia JSON: `api-backend/data/audit_logs.json`
 
-### Opção 1: Vercel (Frontend) + Railway (Backend)
-1. Deploy frontend no Vercel
-2. Deploy backend no Railway
-3. Configure variáveis de ambiente
+Eventos auditados:
+- criacao, atualizacao e exclusao em tabelas operacionais
+- finalizacao de recebimento (`/receipts/finalize`)
 
-### Opção 2: Docker
-```bash
-docker-compose up -d
-```
+Campos-chave do log:
+- `module`, `entity`, `entity_id`, `action`
+- `actor`, `actor_id`, `warehouse_id`
+- `before_data`, `after_data`, `meta`, `created_at`
 
----
+### Tela Auditoria Geral
+- Módulo frontend: `Auditoria Geral` no menu lateral
+- Endpoint backend: `GET /audit_logs/search`
+- Filtros suportados: `module`, `entity`, `action`, `actor`, `warehouse_id`, `from`, `to`, `q`, `limit`, `offset`
+- Comportamento de escopo:
+  - `warehouse_id=ARMZ28` + `include_global=true` inclui registros globais (sem armazém)
+  - `warehouse_id=all` consulta todos os armazéns
 
-## �Y"� Screenshots
-
-<div align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="45%"/>
-  <img src="docs/screenshots/inventory.png" alt="Estoque" width="45%"/>
-</div>
-
----
-
-## �Y�� Contribuindo
-
-Contribuições são bem-vindas! Para contribuir:
-
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
-
----
-
-## �Y"� Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
-
----
-
-## �Y'��?��Y'� Autor
-
-**Norte Tech Solutions**
-- Website: [nortetech.com](https://nortetech.com)
-- Email: contato@nortetech.com
-
----
-
-## �YT� Agradecimentos
-
-- [React](https://reactjs.org/)
-- [Vite](https://vitejs.dev/)
-- [Recharts](https://recharts.org/)
-- [OWASP](https://owasp.org/)
-
----
-
-<div align="center">
-  Feito com ❤️ por <strong>Norte Tech</strong>
-  
-  ⭐ Se este projeto te ajudou, considere dar uma estrela!
-</div>
-
-
-
+## Deploy
+- Frontend pode ser publicado separadamente (Vite build)
+- Backend pode rodar em EC2/RDS
+- Nginx/proxy recomendado para expor `/api`

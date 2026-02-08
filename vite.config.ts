@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const apiTarget = env.VITE_API_URL && env.VITE_API_URL.startsWith('http')
     ? env.VITE_API_URL
-    : 'http://localhost:3001';
+    : 'http://127.0.0.1:3001';
 
   return {
     server: {

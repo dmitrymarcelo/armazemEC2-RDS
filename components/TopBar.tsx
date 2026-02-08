@@ -1,5 +1,6 @@
 import React from 'react';
 import { User, AppNotification } from '../types';
+import { formatTimePtBR } from '../utils/dateTime';
 
 interface TopBarProps {
   isDarkMode: boolean;
@@ -109,7 +110,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                             {notification.title}
                           </p>
                           <p className="text-[10px] text-slate-400 font-bold mt-1">
-                            {new Date(notification.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            {formatTimePtBR(notification.createdAt, '--:--')}
                           </p>
                         </div>
                       </div>

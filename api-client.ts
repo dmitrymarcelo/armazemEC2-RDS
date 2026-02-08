@@ -1,6 +1,6 @@
 ﻿const AUTH_TOKEN_STORAGE_KEY = 'auth_token';
 const DEFAULT_API_BASE = '/api';
-const LOCAL_API_FALLBACK = 'http://127.0.0.1:3001';
+const LOCAL_API_FALLBACKS = ['http://127.0.0.1:3001', 'http://localhost:3001'];
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_GET_RETRIES = 2;
 
@@ -22,13 +22,7 @@ class ApiClient implements PromiseLike<any> {
 
   constructor() {
     const envBaseUrl = import.meta.env.VITE_API_URL;
-    if (envBaseUrl) {
-      this.baseUrl = normalizeBaseUrl(envBaseUrl);
-    } else {
-      // Em ambiente web local, usamos /api para aproveitar o proxy do Vite.
-      // Caso falhe por rede, o cliente faz fallback para 127.0.0.1:3001 automaticamente.
-      this.baseUrl = DEFAULT_API_BASE;
-    }
+    this.baseUrl = envBaseUrl ? normalizeBaseUrl(envBaseUrl) : DEFAULT_API_BASE;
 
     const timeoutFromEnv = Number.parseInt(String(import.meta.env.VITE_API_TIMEOUT_MS || ''), 10);
     this.requestTimeoutMs = Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0 ? timeoutFromEnv : DEFAULT_TIMEOUT_MS;
@@ -119,6 +113,34 @@ class ApiClient implements PromiseLike<any> {
     this.setAuthToken(null);
   }
 
+  private isLocalBrowserHost() {
+    if (typeof window === 'undefined') return false;
+    const host = window.location.hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+  }
+
+  private isLocalApiBase(base: string) {
+    return /^https?:\/\/(127\.0\.0\.1|localhost):3001$/i.test(base);
+  }
+
+  private getBaseUrlCandidates() {
+    const primary = normalizeBaseUrl(this.baseUrl);
+    const candidates: string[] = [primary];
+
+    if (!this.isLocalBrowserHost()) {
+      return candidates;
+    }
+
+    if (primary === DEFAULT_API_BASE) {
+      candidates.push(...LOCAL_API_FALLBACKS);
+    } else if (this.isLocalApiBase(primary)) {
+      candidates.push(DEFAULT_API_BASE);
+      candidates.push(...LOCAL_API_FALLBACKS);
+    }
+
+    return [...new Set(candidates.map((base) => normalizeBaseUrl(base)))];
+  }
+
   private getRequestUrl(baseUrlOverride?: string) {
     const endpointBase = normalizeBaseUrl(baseUrlOverride || this.baseUrl);
     const endpoint = `${endpointBase}/${this.table}`;
@@ -137,15 +159,12 @@ class ApiClient implements PromiseLike<any> {
     return message.includes('failed to fetch') || message.includes('networkerror') || message.includes('aborted');
   }
 
-  private shouldRetryWithLocalApi(error: unknown) {
-    if (typeof window === 'undefined') return false;
-    if (this.baseUrl !== DEFAULT_API_BASE) return false;
+  private shouldRetryAlternativeForHttpError(status: number, errorMessage: unknown) {
+    if (!this.isLocalBrowserHost()) return false;
+    if (status === 404 || status === 502 || status === 503 || status === 504) return true;
 
-    const host = window.location.hostname;
-    const isLocalHost = host === 'localhost' || host === '127.0.0.1';
-    if (!isLocalHost) return false;
-
-    return this.isNetworkError(error);
+    const normalized = String(errorMessage || '').toLowerCase();
+    return normalized.includes('not found');
   }
 
   private formatNetworkError(error: unknown) {
@@ -157,7 +176,7 @@ class ApiClient implements PromiseLike<any> {
     }
 
     if (normalizedMessage.includes('failed to fetch') || normalizedMessage.includes('networkerror')) {
-      return 'Falha de conexao com a API. Verifique se o backend esta ativo (proxy /api ou porta 3001).';
+      return 'Falha de conexão com a API. Verifique se o backend está ativo (proxy /api ou porta 3001).';
     }
 
     return rawMessage;
@@ -207,10 +226,15 @@ class ApiClient implements PromiseLike<any> {
 
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
-      return { data: null, error: errData.error || response.statusText };
+      return { data: null, error: errData.error || response.statusText, httpStatus: response.status };
     }
 
-    return await response.json();
+    const payload = await response.json().catch(() => ({}));
+    if (payload && typeof payload === 'object') {
+      return { ...payload, httpStatus: response.status };
+    }
+
+    return { data: payload, error: null, httpStatus: response.status };
   }
 
   async execute() {
@@ -230,21 +254,37 @@ class ApiClient implements PromiseLike<any> {
       options.body = JSON.stringify(this.bodyData);
     }
 
-    try {
-      const response = await this.fetchWithRetry(this.getRequestUrl(), options);
-      return await this.parseResponse(response);
-    } catch (err: unknown) {
-      if (this.shouldRetryWithLocalApi(err)) {
-        try {
-          const fallbackResponse = await this.fetchWithRetry(this.getRequestUrl(LOCAL_API_FALLBACK), options);
-          return await this.parseResponse(fallbackResponse);
-        } catch (fallbackError: unknown) {
-          return { data: null, error: this.formatNetworkError(fallbackError) };
-        }
-      }
+    const baseCandidates = this.getBaseUrlCandidates();
+    let lastResult: any = null;
 
-      return { data: null, error: this.formatNetworkError(err) };
+    for (let index = 0; index < baseCandidates.length; index += 1) {
+      const base = baseCandidates[index];
+      const hasNextCandidate = index < baseCandidates.length - 1;
+
+      try {
+        const response = await this.fetchWithRetry(this.getRequestUrl(base), options);
+        const result = await this.parseResponse(response);
+
+        if (!result.error) {
+          return result;
+        }
+
+        lastResult = result;
+        if (hasNextCandidate && this.shouldRetryAlternativeForHttpError(response.status, result.error)) {
+          continue;
+        }
+
+        return result;
+      } catch (error: unknown) {
+        if (hasNextCandidate && this.isNetworkError(error)) {
+          continue;
+        }
+
+        return { data: null, error: this.formatNetworkError(error) };
+      }
     }
+
+    return lastResult || { data: null, error: 'Erro de rede' };
   }
 
   then<TResult1 = any, TResult2 = never>(

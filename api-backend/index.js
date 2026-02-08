@@ -21,6 +21,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-change-me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
+const DB_HEALTHCHECK_INTERVAL_MS = Number(process.env.DB_HEALTHCHECK_INTERVAL_MS || 10000);
 
 const PASSWORD_PREFIX = 'pbkdf2';
 const PASSWORD_ITERATIONS = 310000;
@@ -42,6 +43,7 @@ const TABLE_WHITELIST = [
   'notifications',
   'material_requests',
   'cost_centers',
+  'audit_logs',
 ];
 
 const TABLE_COLUMNS = {
@@ -57,6 +59,36 @@ const TABLE_COLUMNS = {
   notifications: ['id', 'title', 'message', 'type', 'read', 'user_id', 'created_at'],
   material_requests: ['id', 'sku', 'name', 'qty', 'plate', 'dept', 'priority', 'status', 'cost_center', 'warehouse_id', 'created_at'],
   cost_centers: ['id', 'code', 'name', 'manager', 'budget', 'status', 'created_at'],
+  audit_logs: [
+    'id',
+    'entity',
+    'entity_id',
+    'module',
+    'action',
+    'actor',
+    'actor_id',
+    'warehouse_id',
+    'before_data',
+    'after_data',
+    'meta',
+    'created_at',
+  ],
+};
+
+const TABLE_JSON_COLUMNS = {
+  users: ['modules', 'allowed_warehouses'],
+  purchase_orders: ['items', 'quotes', 'approval_history'],
+  audit_logs: ['before_data', 'after_data', 'meta'],
+};
+
+const TABLE_TIMESTAMP_COLUMNS = {
+  users: ['last_access'],
+  vehicles: ['last_maintenance'],
+  inventory: ['last_counted_at'],
+  movements: ['timestamp'],
+  purchase_orders: ['request_date', 'sent_to_vendor_at', 'received_at', 'quotes_added_at', 'approved_at', 'rejected_at'],
+  cyclic_batches: ['scheduled_date', 'completed_at'],
+  cyclic_counts: ['counted_at'],
 };
 
 const ensureDataDirExists = () => {
@@ -68,6 +100,8 @@ const ensureDataDirExists = () => {
 ensureDataDirExists();
 
 let dbConnected = false;
+let dbLastError = null;
+let dbLastCheckedAt = null;
 const pool = new pg.Pool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -77,17 +111,81 @@ const pool = new pg.Pool({
   connectionTimeoutMillis: 2000,
 });
 
-pool
-  .connect()
-  .then((client) => {
-    dbConnected = true;
+const DB_CONNECTION_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'ETIMEDOUT',
+  '57P01',
+  '57P02',
+  '57P03',
+  '08001',
+  '08003',
+  '08006',
+]);
+
+const getErrorReason = (err) => {
+  if (!err) return 'Erro desconhecido';
+  if (err instanceof Error) return err.message;
+  return String(err);
+};
+
+const isDbConnectionError = (err) => {
+  const code = String(err?.code || '').toUpperCase();
+  if (DB_CONNECTION_ERROR_CODES.has(code)) return true;
+
+  const message = getErrorReason(err).toLowerCase();
+  return (
+    message.includes('connect') ||
+    message.includes('connection') ||
+    message.includes('timeout') ||
+    message.includes('econnrefused') ||
+    message.includes('server closed the connection unexpectedly')
+  );
+};
+
+const setDbStatus = (connected, err) => {
+  const previous = dbConnected;
+  dbConnected = connected;
+  dbLastCheckedAt = new Date().toISOString();
+
+  if (connected) {
+    dbLastError = null;
+    if (!previous) {
+      console.log('PostgreSQL available. Switching to production mode.');
+    }
+    return;
+  }
+
+  dbLastError = getErrorReason(err);
+  if (previous) {
+    console.warn('PostgreSQL unavailable. Switching to JSON contingency mode.');
+  }
+};
+
+const verifyDbConnection = async (logInitialFailure = false) => {
+  try {
+    const client = await pool.connect();
     client.release();
-    console.log('Connected to PostgreSQL.');
-  })
-  .catch(() => {
-    dbConnected = false;
-    console.warn('PostgreSQL unavailable. Running in JSON contingency mode.');
-  });
+    setDbStatus(true);
+  } catch (err) {
+    setDbStatus(false, err);
+    if (logInitialFailure) {
+      console.warn('PostgreSQL unavailable on startup. Running in JSON contingency mode.');
+    }
+  }
+};
+
+const markDbDisconnectedIfNeeded = (err) => {
+  if (!isDbConnectionError(err)) return;
+  setDbStatus(false, err);
+};
+
+await verifyDbConnection(true);
+
+setInterval(() => {
+  void verifyDbConnection(false);
+}, DB_HEALTHCHECK_INTERVAL_MS);
 
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -204,6 +302,63 @@ const parseOffset = (offsetValue) => {
   if (Number.isNaN(parsed) || parsed < 0) return null;
 
   return parsed;
+};
+
+const parseDateFilter = (dateValue) => {
+  if (!dateValue) return null;
+  const parsed = new Date(String(dateValue));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+};
+
+const includesText = (source, term) => String(source || '').toLowerCase().includes(String(term || '').toLowerCase());
+
+const filterAuditLogRows = (rows, filters) => {
+  const fromIso = filters.from ? parseDateFilter(filters.from) : null;
+  const toIso = filters.to ? parseDateFilter(filters.to) : null;
+  const searchTerm = String(filters.q || '').trim().toLowerCase();
+  const warehouseFilter = String(filters.warehouse_id || '').trim();
+  const includeGlobal = String(filters.include_global || 'true').toLowerCase() !== 'false';
+
+  return rows.filter((row) => {
+    if (filters.module && !includesText(row.module, filters.module)) return false;
+    if (filters.entity && !includesText(row.entity, filters.entity)) return false;
+    if (filters.action && !includesText(row.action, filters.action)) return false;
+    if (filters.actor && !includesText(row.actor, filters.actor)) return false;
+
+    if (warehouseFilter && warehouseFilter !== 'all') {
+      const rowWarehouse = String(row?.warehouse_id || '').trim();
+      const warehouseMatches = rowWarehouse === warehouseFilter;
+      const isGlobal = rowWarehouse.length === 0;
+      if (!(warehouseMatches || (includeGlobal && isGlobal))) return false;
+    }
+
+    const createdAt = new Date(String(row?.created_at || ''));
+    if ((fromIso || toIso) && Number.isNaN(createdAt.getTime())) return false;
+    if (fromIso && createdAt < new Date(fromIso)) return false;
+    if (toIso && createdAt > new Date(toIso)) return false;
+
+    if (searchTerm) {
+      const haystack = [
+        row.module,
+        row.entity,
+        row.entity_id,
+        row.action,
+        row.actor,
+        row.actor_id,
+        row.warehouse_id,
+        JSON.stringify(row.meta || {}),
+        JSON.stringify(row.before_data || {}),
+        JSON.stringify(row.after_data || {}),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      if (!haystack.includes(searchTerm)) return false;
+    }
+
+    return true;
+  });
 };
 
 const isRowMatch = (row, filters) =>
@@ -323,6 +478,49 @@ const normalizeRowsByTable = (table, rows) => {
   return rows;
 };
 
+const normalizeJsonColumnValueForDb = (value) => {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+};
+
+const normalizeTimestampValueForDb = (value) => {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toISOString();
+};
+
+const normalizeRowForDb = (table, row) => {
+  const next = { ...row };
+  const jsonColumns = TABLE_JSON_COLUMNS[table] || [];
+  const timestampColumns = TABLE_TIMESTAMP_COLUMNS[table] || [];
+
+  jsonColumns.forEach((column) => {
+    if (Object.prototype.hasOwnProperty.call(next, column)) {
+      next[column] = normalizeJsonColumnValueForDb(next[column]);
+    }
+  });
+
+  timestampColumns.forEach((column) => {
+    if (Object.prototype.hasOwnProperty.call(next, column)) {
+      next[column] = normalizeTimestampValueForDb(next[column]);
+    }
+  });
+
+  return next;
+};
+
 const isHashedPassword = (password) => typeof password === 'string' && password.startsWith(`${PASSWORD_PREFIX}$`);
 
 const hashPassword = (plainPassword) => {
@@ -425,11 +623,136 @@ const sendServerError = (res, err, fallbackMessage = 'Erro interno no servidor')
   res.status(500).json({ data: null, error: message });
 };
 
+const toPositiveInteger = (value) => {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const normalizeReceiptItems = (rawItems) => {
+  if (!Array.isArray(rawItems)) return [];
+
+  const grouped = new Map();
+
+  rawItems.forEach((rawItem) => {
+    if (!rawItem || typeof rawItem !== 'object') return;
+
+    const sku = String(rawItem.sku || '').trim();
+    const receivedQty = toPositiveInteger(rawItem.received ?? rawItem.qty ?? rawItem.quantity);
+
+    if (!sku || !receivedQty) return;
+
+    const current = grouped.get(sku) || { sku, received: 0 };
+    current.received += receivedQty;
+    grouped.set(sku, current);
+  });
+
+  return Array.from(grouped.values());
+};
+
+const buildReceiptMovementId = (poId, index) => {
+  const normalizedPoId = String(poId || 'PO')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 24);
+  const randomSuffix = crypto.randomBytes(3).toString('hex');
+  return `MOV-REC-${normalizedPoId}-${Date.now()}-${index}-${randomSuffix}`;
+};
+
+const ENTITY_ID_FIELD = {
+  users: 'id',
+  warehouses: 'id',
+  inventory: 'sku',
+  cyclic_batches: 'id',
+  cyclic_counts: 'id',
+  vendors: 'id',
+  vehicles: 'plate',
+  purchase_orders: 'id',
+  movements: 'id',
+  notifications: 'id',
+  material_requests: 'id',
+  cost_centers: 'id',
+  audit_logs: 'id',
+};
+
+const getEntityId = (table, row) => {
+  if (!row || typeof row !== 'object') return null;
+  const key = ENTITY_ID_FIELD[table] || 'id';
+  const value = row[key] ?? row.id ?? row.sku ?? row.plate ?? null;
+  if (value === null || value === undefined) return null;
+  return String(value);
+};
+
+const buildAuditLog = ({
+  module,
+  action,
+  entity,
+  entityId,
+  actor,
+  actorId,
+  warehouseId,
+  beforeData,
+  afterData,
+  meta,
+}) => ({
+  id: crypto.randomUUID(),
+  module: module || entity,
+  entity: entity || module,
+  entity_id: entityId || null,
+  action: String(action || 'update'),
+  actor: String(actor || 'Sistema'),
+  actor_id: actorId ? String(actorId) : null,
+  warehouse_id: warehouseId || beforeData?.warehouse_id || afterData?.warehouse_id || null,
+  before_data: beforeData ?? null,
+  after_data: afterData ?? null,
+  meta: meta ?? null,
+  created_at: new Date().toISOString(),
+});
+
+const writeAuditLogsToJson = (entries) => {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  const currentLogs = readJson('audit_logs');
+  writeJson('audit_logs', [...currentLogs, ...entries]);
+};
+
+const writeAuditLogsToDb = async (db, entries) => {
+  if (!db || !Array.isArray(entries) || entries.length === 0) return;
+
+  for (const entry of entries) {
+    const normalizedEntry = normalizeRowForDb('audit_logs', entry);
+    const columns = Object.keys(normalizedEntry);
+    const values = Object.values(normalizedEntry);
+    const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
+    await db.query(
+      `INSERT INTO audit_logs (${columns.join(', ')}) VALUES (${placeholders})`,
+      values
+    );
+  }
+};
+
+const persistAuditLogs = async (entries, db = null) => {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+
+  if (!dbConnected || !db) {
+    writeAuditLogsToJson(entries);
+    return;
+  }
+
+  try {
+    await writeAuditLogsToDb(db, entries);
+  } catch (err) {
+    // Auditoria nunca deve quebrar o fluxo principal da API.
+    console.warn(`Audit log persistence failed: ${getErrorReason(err)}`);
+    writeAuditLogsToJson(entries);
+  }
+};
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     database: dbConnected ? 'connected' : 'disconnected',
     mode: dbConnected ? 'production' : 'contingency-json',
+    database_last_error: dbLastError,
+    database_last_checked_at: dbLastCheckedAt,
   });
 });
 
@@ -496,6 +819,7 @@ app.post('/login', async (req, res) => {
     const token = issueToken(user);
     res.json({ data: sanitizeResponse(user), token, error: null });
   } catch (err) {
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err);
   }
 });
@@ -547,7 +871,529 @@ app.post('/fleet-sync', authenticate, async (req, res) => {
 
     res.json(payload);
   } catch (err) {
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err, 'Falha ao consultar Fleet API');
+  }
+});
+
+app.post('/receipts/finalize', authenticate, async (req, res) => {
+  const poId = String(req.body?.po_id || req.body?.poId || '').trim();
+  const requestedWarehouseId = String(req.body?.warehouse_id || req.body?.warehouseId || '').trim();
+  const receiptItems = normalizeReceiptItems(req.body?.items);
+
+  if (!poId) {
+    res.status(400).json({ data: null, error: 'po_id eh obrigatorio' });
+    return;
+  }
+
+  if (receiptItems.length === 0) {
+    res.status(400).json({ data: null, error: 'Nenhum item valido para recebimento' });
+    return;
+  }
+
+  const receivedAtIso = new Date().toISOString();
+  const receiptReason = `Entrada via Recebimento de ${poId}`;
+  const receiptUser = String(req.auth?.email || req.auth?.sub || 'Sistema');
+  const receiptActorId = req.auth?.sub ? String(req.auth.sub) : null;
+
+  if (!dbConnected) {
+    const purchaseOrders = normalizeRowsByTable('purchase_orders', readJson('purchase_orders'));
+    const poIndex = purchaseOrders.findIndex((order) => String(order.id) === poId);
+
+    if (poIndex === -1) {
+      res.status(404).json({ data: null, error: `Pedido ${poId} nao encontrado` });
+      return;
+    }
+
+    const targetPo = purchaseOrders[poIndex];
+    if (String(targetPo.status) !== 'enviado') {
+      res.status(409).json({
+        data: null,
+        error: `Pedido ${poId} ja foi recebido ou nao esta em status enviado`,
+      });
+      return;
+    }
+
+    const targetWarehouseId = requestedWarehouseId || targetPo.warehouse_id || 'ARMZ28';
+    const inventory = normalizeRowsByTable('inventory', readJson('inventory'));
+    const movements = normalizeRowsByTable('movements', readJson('movements'));
+
+    const indexedInventory = new Map();
+    inventory.forEach((item, index) => {
+      const key = `${String(item.sku)}::${String(item.warehouse_id || 'ARMZ28')}`;
+      indexedInventory.set(key, index);
+    });
+
+    const missingSkus = receiptItems
+      .filter((item) => !indexedInventory.has(`${item.sku}::${targetWarehouseId}`))
+      .map((item) => item.sku);
+
+    if (missingSkus.length > 0) {
+      res.status(400).json({
+        data: null,
+        error: `Itens nao encontrados no estoque do armazem ${targetWarehouseId}: ${missingSkus.join(', ')}`,
+      });
+      return;
+    }
+
+    const inventoryUpdates = [];
+    const newMovements = [];
+
+    receiptItems.forEach((item, index) => {
+      const mapKey = `${item.sku}::${targetWarehouseId}`;
+      const inventoryIndex = indexedInventory.get(mapKey);
+      const currentInventory = inventory[inventoryIndex];
+      const previousQty = Number(currentInventory.quantity || 0);
+      const nextQty = previousQty + item.received;
+
+      inventory[inventoryIndex] = {
+        ...currentInventory,
+        quantity: nextQty,
+      };
+
+      inventoryUpdates.push({
+        sku: item.sku,
+        previous_qty: previousQty,
+        received: item.received,
+        new_qty: nextQty,
+      });
+
+      newMovements.push({
+        id: buildReceiptMovementId(poId, index + 1),
+        sku: item.sku,
+        product_name: currentInventory.name || item.sku,
+        type: 'entrada',
+        quantity: item.received,
+        timestamp: receivedAtIso,
+        user: receiptUser,
+        location: currentInventory.location || 'DOCA-01',
+        reason: receiptReason,
+        order_id: poId,
+        warehouse_id: targetWarehouseId,
+      });
+    });
+
+    const updatedPo = {
+      ...targetPo,
+      status: 'recebido',
+      received_at: receivedAtIso,
+    };
+    purchaseOrders[poIndex] = updatedPo;
+
+    writeJson('inventory', inventory);
+    writeJson('movements', [...movements, ...newMovements]);
+    writeJson('purchase_orders', purchaseOrders);
+
+    const receiptAuditLogs = [
+      buildAuditLog({
+        module: 'recebimento',
+        action: 'receipt_finalize',
+        entity: 'purchase_orders',
+        entityId: poId,
+        actor: receiptUser,
+        actorId: receiptActorId,
+        warehouseId: targetWarehouseId,
+        beforeData: targetPo,
+        afterData: updatedPo,
+        meta: {
+          po_id: poId,
+          items: receiptItems,
+        },
+      }),
+      ...inventoryUpdates.map((entry) =>
+        buildAuditLog({
+          module: 'recebimento',
+          action: 'inventory_increment',
+          entity: 'inventory',
+          entityId: entry.sku,
+          actor: receiptUser,
+          actorId: receiptActorId,
+          warehouseId: targetWarehouseId,
+          beforeData: { quantity: entry.previous_qty },
+          afterData: { quantity: entry.new_qty },
+          meta: {
+            po_id: poId,
+            received: entry.received,
+          },
+        })
+      ),
+    ];
+
+    await persistAuditLogs(receiptAuditLogs);
+
+    res.json({
+      data: {
+        po: normalizePurchaseOrderRecord(updatedPo),
+        inventory_updates: inventoryUpdates,
+        movements: newMovements,
+      },
+      error: null,
+    });
+    return;
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const poResult = await client.query('SELECT * FROM purchase_orders WHERE id = $1 FOR UPDATE', [poId]);
+    if (poResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ data: null, error: `Pedido ${poId} nao encontrado` });
+      return;
+    }
+
+    const targetPo = normalizePurchaseOrderRecord(poResult.rows[0]);
+    if (String(targetPo.status) !== 'enviado') {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        data: null,
+        error: `Pedido ${poId} ja foi recebido ou nao esta em status enviado`,
+      });
+      return;
+    }
+
+    const targetWarehouseId = requestedWarehouseId || targetPo.warehouse_id || 'ARMZ28';
+    const inventoryUpdates = [];
+    const movementRows = [];
+
+    for (let index = 0; index < receiptItems.length; index += 1) {
+      const item = receiptItems[index];
+      const inventoryUpdate = await client.query(
+        `
+          UPDATE inventory
+             SET quantity = quantity + $1
+           WHERE sku = $2
+             AND warehouse_id = $3
+         RETURNING *
+        `,
+        [item.received, item.sku, targetWarehouseId]
+      );
+
+      if (inventoryUpdate.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(400).json({
+          data: null,
+          error: `Item ${item.sku} nao encontrado no estoque do armazem ${targetWarehouseId}`,
+        });
+        return;
+      }
+
+      const updatedInventory = inventoryUpdate.rows[0];
+      const newQty = Number(updatedInventory.quantity || 0);
+      const previousQty = newQty - item.received;
+
+      inventoryUpdates.push({
+        sku: item.sku,
+        previous_qty: previousQty,
+        received: item.received,
+        new_qty: newQty,
+      });
+
+      const movementInsert = await client.query(
+        `
+          INSERT INTO movements (id, sku, product_name, type, quantity, timestamp, "user", location, reason, order_id, warehouse_id)
+          VALUES ($1, $2, $3, 'entrada', $4, $5, $6, $7, $8, $9, $10)
+          RETURNING *
+        `,
+        [
+          crypto.randomUUID(),
+          item.sku,
+          updatedInventory.name || item.sku,
+          item.received,
+          receivedAtIso,
+          receiptUser,
+          updatedInventory.location || 'DOCA-01',
+          receiptReason,
+          poId,
+          targetWarehouseId,
+        ]
+      );
+
+      movementRows.push(movementInsert.rows[0]);
+    }
+
+    const poUpdate = await client.query(
+      `
+        UPDATE purchase_orders
+           SET status = 'recebido',
+               received_at = $1
+         WHERE id = $2
+       RETURNING *
+      `,
+      [receivedAtIso, poId]
+    );
+
+    const updatedPoRow = poUpdate.rows[0];
+    const receiptAuditLogs = [
+      buildAuditLog({
+        module: 'recebimento',
+        action: 'receipt_finalize',
+        entity: 'purchase_orders',
+        entityId: poId,
+        actor: receiptUser,
+        actorId: receiptActorId,
+        warehouseId: targetWarehouseId,
+        beforeData: targetPo,
+        afterData: updatedPoRow,
+        meta: {
+          po_id: poId,
+          items: receiptItems,
+        },
+      }),
+      ...inventoryUpdates.map((entry) =>
+        buildAuditLog({
+          module: 'recebimento',
+          action: 'inventory_increment',
+          entity: 'inventory',
+          entityId: entry.sku,
+          actor: receiptUser,
+          actorId: receiptActorId,
+          warehouseId: targetWarehouseId,
+          beforeData: { quantity: entry.previous_qty },
+          afterData: { quantity: entry.new_qty },
+          meta: {
+            po_id: poId,
+            received: entry.received,
+          },
+        })
+      ),
+    ];
+
+    await persistAuditLogs(receiptAuditLogs, client);
+
+    await client.query('COMMIT');
+
+    res.json({
+      data: {
+        po: normalizePurchaseOrderRecord(updatedPoRow),
+        inventory_updates: inventoryUpdates,
+        movements: normalizeRowsByTable('movements', movementRows),
+      },
+      error: null,
+    });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    markDbDisconnectedIfNeeded(err);
+    sendServerError(res, err, 'Falha ao finalizar recebimento');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.get('/audit_logs/search', authenticate, async (req, res) => {
+  const limit = parseLimit(toScalar(req.query.limit)) || 50;
+  if (toScalar(req.query.limit) && !parseLimit(toScalar(req.query.limit))) {
+    res.status(400).json({ data: null, error: 'Limite invalido' });
+    return;
+  }
+
+  const offset = parseOffset(toScalar(req.query.offset));
+  if (toScalar(req.query.offset) && offset === null) {
+    res.status(400).json({ data: null, error: 'Offset invalido' });
+    return;
+  }
+
+  const from = toScalar(req.query.from);
+  const to = toScalar(req.query.to);
+  const fromIso = from ? parseDateFilter(from) : null;
+  const toIso = to ? parseDateFilter(to) : null;
+
+  if (from && !fromIso) {
+    res.status(400).json({ data: null, error: 'Data inicial invalida' });
+    return;
+  }
+
+  if (to && !toIso) {
+    res.status(400).json({ data: null, error: 'Data final invalida' });
+    return;
+  }
+
+  const filters = {
+    module: String(toScalar(req.query.module) || '').trim(),
+    entity: String(toScalar(req.query.entity) || '').trim(),
+    action: String(toScalar(req.query.action) || '').trim(),
+    actor: String(toScalar(req.query.actor) || '').trim(),
+    warehouse_id: String(toScalar(req.query.warehouse_id) || '').trim(),
+    include_global: String(toScalar(req.query.include_global) || 'true').trim(),
+    q: String(toScalar(req.query.q) || '').trim(),
+    from: fromIso,
+    to: toIso,
+  };
+
+  const safeOffset = offset || 0;
+
+  const buildAuditResponse = (inputRows) => {
+    const rows = [...inputRows].sort((a, b) => {
+      const aDate = new Date(String(a?.created_at || '')).getTime();
+      const bDate = new Date(String(b?.created_at || '')).getTime();
+      if (!Number.isFinite(aDate) && !Number.isFinite(bDate)) return 0;
+      if (!Number.isFinite(aDate)) return 1;
+      if (!Number.isFinite(bDate)) return -1;
+      return bDate - aDate;
+    });
+
+    const total = rows.length;
+    const pageRows = rows.slice(safeOffset, safeOffset + limit);
+    const hasMore = safeOffset + pageRows.length < total;
+
+    return {
+      data: sanitizeResponse(pageRows),
+      total,
+      has_more: hasMore,
+      next_offset: hasMore ? safeOffset + pageRows.length : null,
+      error: null,
+    };
+  };
+
+  const getJsonFallbackRows = () => {
+    let rows = normalizeRowsByTable('audit_logs', readJson('audit_logs'));
+    rows = filterAuditLogRows(rows, filters);
+    return rows;
+  };
+
+  if (!dbConnected) {
+    res.json(buildAuditResponse(getJsonFallbackRows()));
+    return;
+  }
+
+  try {
+    const whereParts = [];
+    const values = [];
+
+    const pushValue = (value) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+
+    if (filters.module) {
+      const marker = pushValue(`%${filters.module}%`);
+      whereParts.push(`module ILIKE ${marker}`);
+    }
+
+    if (filters.entity) {
+      const marker = pushValue(`%${filters.entity}%`);
+      whereParts.push(`entity ILIKE ${marker}`);
+    }
+
+    if (filters.action) {
+      const marker = pushValue(`%${filters.action}%`);
+      whereParts.push(`action ILIKE ${marker}`);
+    }
+
+    if (filters.actor) {
+      const marker = pushValue(`%${filters.actor}%`);
+      whereParts.push(`actor ILIKE ${marker}`);
+    }
+
+    if (filters.warehouse_id && filters.warehouse_id !== 'all') {
+      const marker = pushValue(filters.warehouse_id);
+      const includeGlobal = String(filters.include_global).toLowerCase() !== 'false';
+      if (includeGlobal) {
+        whereParts.push(`(warehouse_id = ${marker} OR warehouse_id IS NULL OR warehouse_id = '')`);
+      } else {
+        whereParts.push(`warehouse_id = ${marker}`);
+      }
+    }
+
+    if (fromIso) {
+      const marker = pushValue(fromIso);
+      whereParts.push(`created_at >= ${marker}`);
+    }
+
+    if (toIso) {
+      const marker = pushValue(toIso);
+      whereParts.push(`created_at <= ${marker}`);
+    }
+
+    if (filters.q) {
+      const marker = pushValue(`%${filters.q}%`);
+      whereParts.push(`(
+        module ILIKE ${marker}
+        OR entity ILIKE ${marker}
+        OR entity_id ILIKE ${marker}
+        OR action ILIKE ${marker}
+        OR actor ILIKE ${marker}
+        OR actor_id ILIKE ${marker}
+        OR warehouse_id ILIKE ${marker}
+        OR CAST(meta AS TEXT) ILIKE ${marker}
+        OR CAST(before_data AS TEXT) ILIKE ${marker}
+        OR CAST(after_data AS TEXT) ILIKE ${marker}
+      )`);
+    }
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const jsonFallbackRows = getJsonFallbackRows();
+    if (jsonFallbackRows.length > 0) {
+      const allDbRowsResult = await pool.query(
+        `
+          SELECT *
+          FROM audit_logs
+          ${whereClause}
+          ORDER BY created_at DESC
+        `,
+        values
+      );
+
+      const dbRows = normalizeRowsByTable('audit_logs', allDbRowsResult.rows);
+      const merged = [];
+      const seen = new Set();
+
+      [...dbRows, ...jsonFallbackRows].forEach((row, index) => {
+        const dedupeKey = row?.id
+          ? `id:${row.id}`
+          : `sig:${row?.module || ''}|${row?.entity || ''}|${row?.entity_id || ''}|${row?.action || ''}|${row?.created_at || ''}|${index}`;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        merged.push(row);
+      });
+
+      res.json(buildAuditResponse(merged));
+      return;
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM audit_logs ${whereClause}`,
+      values
+    );
+    const total = Number(countResult.rows?.[0]?.total || 0);
+
+    const dataValues = [...values];
+    dataValues.push(limit, safeOffset);
+    const limitMarker = `$${dataValues.length - 1}`;
+    const offsetMarker = `$${dataValues.length}`;
+
+    const dataResult = await pool.query(
+      `
+        SELECT *
+        FROM audit_logs
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT ${limitMarker}
+        OFFSET ${offsetMarker}
+      `,
+      dataValues
+    );
+
+    const rows = normalizeRowsByTable('audit_logs', dataResult.rows);
+    const hasMore = safeOffset + rows.length < total;
+
+    res.json({
+      data: sanitizeResponse(rows),
+      total,
+      has_more: hasMore,
+      next_offset: hasMore ? safeOffset + rows.length : null,
+      error: null,
+    });
+  } catch (err) {
+    markDbDisconnectedIfNeeded(err);
+    console.warn(`Audit search fallback activated: ${getErrorReason(err)}`);
+    res.json({
+      ...buildAuditResponse(getJsonFallbackRows()),
+      source: 'json-fallback',
+    });
   }
 });
 
@@ -625,12 +1471,15 @@ app.get('/:table', authenticate, async (req, res) => {
     const rows = normalizeRowsByTable(table, result.rows);
     res.json({ data: sanitizeResponse(rows), error: null });
   } catch (err) {
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err);
   }
 });
 
 app.post('/:table', authenticate, async (req, res) => {
   const { table } = req.params;
+  const actor = String(req.auth?.email || req.auth?.sub || 'Sistema');
+  const actorId = req.auth?.sub ? String(req.auth.sub) : null;
 
   if (!validateTable(table)) {
     res.status(403).json({ data: null, error: 'Tabela nao permitida' });
@@ -655,6 +1504,13 @@ app.post('/:table', authenticate, async (req, res) => {
     if (table === 'users' && 'password' in nextRow) {
       nextRow.password = ensurePasswordHash(nextRow.password);
     }
+    if (table === 'cyclic_counts') {
+      if (!nextRow.id) nextRow.id = crypto.randomUUID();
+      if (!nextRow.status) nextRow.status = 'pendente';
+    }
+    if (table === 'movements' && !nextRow.id) {
+      nextRow.id = crypto.randomUUID();
+    }
     return nextRow;
   });
 
@@ -662,6 +1518,24 @@ app.post('/:table', authenticate, async (req, res) => {
     const currentData = readJson(table);
     const updatedData = [...currentData, ...preparedRows];
     writeJson(table, updatedData);
+
+    if (table !== 'audit_logs') {
+      const auditEntries = preparedRows.map((row) =>
+        buildAuditLog({
+          module: table,
+          action: 'create',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || null,
+          beforeData: null,
+          afterData: row,
+          meta: null,
+        })
+      );
+      await persistAuditLogs(auditEntries);
+    }
 
     const normalizedRows = normalizeRowsByTable(table, preparedRows);
     const responseData = Array.isArray(payload) ? normalizedRows : normalizedRows[0];
@@ -675,8 +1549,9 @@ app.post('/:table', authenticate, async (req, res) => {
     await client.query('BEGIN');
 
     const insertedRows = [];
+    const preparedRowsForDb = preparedRows.map((row) => normalizeRowForDb(table, row));
 
-    for (const row of preparedRows) {
+    for (const row of preparedRowsForDb) {
       const columns = Object.keys(row);
       if (columns.length === 0) {
         throw new Error('Payload vazio nao pode ser inserido');
@@ -693,9 +1568,29 @@ app.post('/:table', authenticate, async (req, res) => {
     await client.query('COMMIT');
 
     const normalized = normalizeRowsByTable(table, insertedRows);
+
+    if (table !== 'audit_logs') {
+      const auditEntries = normalized.map((row) =>
+        buildAuditLog({
+          module: table,
+          action: 'create',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || null,
+          beforeData: null,
+          afterData: row,
+          meta: null,
+        })
+      );
+      await persistAuditLogs(auditEntries, client);
+    }
+
     res.json({ data: sanitizeResponse(Array.isArray(payload) ? normalized : normalized[0]), error: null });
   } catch (err) {
     if (client) await client.query('ROLLBACK');
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err);
   } finally {
     if (client) client.release();
@@ -704,6 +1599,8 @@ app.post('/:table', authenticate, async (req, res) => {
 
 app.patch('/:table', authenticate, async (req, res) => {
   const { table } = req.params;
+  const actor = String(req.auth?.email || req.auth?.sub || 'Sistema');
+  const actorId = req.auth?.sub ? String(req.auth.sub) : null;
 
   if (!validateTable(table)) {
     res.status(403).json({ data: null, error: 'Tabela nao permitida' });
@@ -744,10 +1641,12 @@ app.patch('/:table', authenticate, async (req, res) => {
   if (!dbConnected) {
     const currentData = readJson(table);
     const updatedRows = [];
+    const beforeRows = [];
 
     const nextData = currentData.map((row) => {
       if (!isRowMatch(row, filters)) return row;
 
+      beforeRows.push(row);
       const updatedRow = { ...row, ...updates };
       updatedRows.push(updatedRow);
       return updatedRow;
@@ -759,23 +1658,52 @@ app.patch('/:table', authenticate, async (req, res) => {
     }
 
     writeJson(table, nextData);
+
+    if (table !== 'audit_logs') {
+      const auditEntries = updatedRows.map((row, index) =>
+        buildAuditLog({
+          module: table,
+          action: 'update',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || beforeRows[index]?.warehouse_id || null,
+          beforeData: beforeRows[index] || null,
+          afterData: row,
+          meta: {
+            filters,
+            changed_fields: Object.keys(updates),
+          },
+        })
+      );
+      await persistAuditLogs(auditEntries);
+    }
+
     res.json({ data: sanitizeResponse(normalizeRowsByTable(table, updatedRows)), error: null });
     return;
   }
 
   try {
-    const updateEntries = Object.entries(updates);
+    const dbUpdates = normalizeRowForDb(table, updates);
+    const updateEntries = Object.entries(dbUpdates);
     const filterEntries = Object.entries(filters);
 
     const setClause = updateEntries.map(([column], index) => `${column} = $${index + 1}`).join(', ');
     const whereClause = filterEntries
       .map(([column], index) => `${column} = $${updateEntries.length + index + 1}`)
       .join(' AND ');
+    const beforeWhereClause = filterEntries
+      .map(([column], index) => `${column} = $${index + 1}`)
+      .join(' AND ');
 
     const values = [
       ...updateEntries.map(([, value]) => value),
       ...filterEntries.map(([, value]) => coerceValue(value)),
     ];
+
+    const beforeQuery = `SELECT * FROM ${table} WHERE ${beforeWhereClause}`;
+    const beforeResult = await pool.query(beforeQuery, filterEntries.map(([, value]) => coerceValue(value)));
 
     const query = `UPDATE ${table} SET ${setClause} WHERE ${whereClause} RETURNING *`;
     const result = await pool.query(query, values);
@@ -785,14 +1713,42 @@ app.patch('/:table', authenticate, async (req, res) => {
       return;
     }
 
-    res.json({ data: sanitizeResponse(normalizeRowsByTable(table, result.rows)), error: null });
+    const normalizedRows = normalizeRowsByTable(table, result.rows);
+
+    if (table !== 'audit_logs') {
+      const beforeRows = normalizeRowsByTable(table, beforeResult.rows);
+      const beforeMap = new Map(beforeRows.map((row) => [getEntityId(table, row), row]));
+      const auditEntries = normalizedRows.map((row) =>
+        buildAuditLog({
+          module: table,
+          action: 'update',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || beforeMap.get(getEntityId(table, row))?.warehouse_id || null,
+          beforeData: beforeMap.get(getEntityId(table, row)) || null,
+          afterData: row,
+          meta: {
+            filters,
+            changed_fields: Object.keys(updates),
+          },
+        })
+      );
+      await persistAuditLogs(auditEntries, pool);
+    }
+
+    res.json({ data: sanitizeResponse(normalizedRows), error: null });
   } catch (err) {
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err);
   }
 });
 
 app.delete('/:table', authenticate, async (req, res) => {
   const { table } = req.params;
+  const actor = String(req.auth?.email || req.auth?.sub || 'Sistema');
+  const actorId = req.auth?.sub ? String(req.auth.sub) : null;
 
   if (!validateTable(table)) {
     res.status(403).json({ data: null, error: 'Tabela nao permitida' });
@@ -822,6 +1778,24 @@ app.delete('/:table', authenticate, async (req, res) => {
     const remainingRows = currentData.filter((row) => !isRowMatch(row, filters));
     writeJson(table, remainingRows);
 
+    if (table !== 'audit_logs') {
+      const auditEntries = deletedRows.map((row) =>
+        buildAuditLog({
+          module: table,
+          action: 'delete',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || null,
+          beforeData: row,
+          afterData: null,
+          meta: { filters },
+        })
+      );
+      await persistAuditLogs(auditEntries);
+    }
+
     res.json({ data: sanitizeResponse(normalizeRowsByTable(table, deletedRows)), error: null });
     return;
   }
@@ -839,8 +1813,29 @@ app.delete('/:table', authenticate, async (req, res) => {
       return;
     }
 
-    res.json({ data: sanitizeResponse(normalizeRowsByTable(table, result.rows)), error: null });
+    const normalizedRows = normalizeRowsByTable(table, result.rows);
+
+    if (table !== 'audit_logs') {
+      const auditEntries = normalizedRows.map((row) =>
+        buildAuditLog({
+          module: table,
+          action: 'delete',
+          entity: table,
+          entityId: getEntityId(table, row),
+          actor,
+          actorId,
+          warehouseId: row?.warehouse_id || null,
+          beforeData: row,
+          afterData: null,
+          meta: { filters },
+        })
+      );
+      await persistAuditLogs(auditEntries, pool);
+    }
+
+    res.json({ data: sanitizeResponse(normalizedRows), error: null });
   } catch (err) {
+    markDbDisconnectedIfNeeded(err);
     sendServerError(res, err);
   }
 });

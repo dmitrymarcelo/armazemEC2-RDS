@@ -1,10 +1,11 @@
-
-export type Module = 'dashboard' | 'recebimento' | 'movimentacoes' | 'estoque' | 'expedicao' | 'inventario_ciclico' | 'compras' | 'gestao_compras' | 'cadastro' | 'relatorios' | 'configuracoes';
+﻿
+export type Module = 'dashboard' | 'recebimento' | 'movimentacoes' | 'auditoria_geral' | 'estoque' | 'expedicao' | 'inventario_ciclico' | 'compras' | 'gestao_compras' | 'cadastro' | 'relatorios' | 'configuracoes';
 
 export const ALL_MODULES: { id: Module; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'recebimento', label: 'Recebimento' },
   { id: 'movimentacoes', label: 'Movimentações' },
+  { id: 'auditoria_geral', label: 'Auditoria Geral' },
   { id: 'estoque', label: 'Estoque' },
   { id: 'expedicao', label: 'Solicitações SA' },
   { id: 'compras', label: 'Compras' },
@@ -25,8 +26,8 @@ export const ROLE_LABELS = {
 
 export const PO_STATUS_LABELS = {
   rascunho: 'Rascunho',
-  requisicao: 'Requisição',
-  cotacao: 'Cotação',
+  requisicao: 'RequisiÃ§Ã£o',
+  cotacao: 'CotaÃ§Ã£o',
   pendente: 'Pendente',
   aprovado: 'Aprovado',
   enviado: 'Enviado',
@@ -35,9 +36,9 @@ export const PO_STATUS_LABELS = {
 };
 
 export const INVENTORY_STATUS_LABELS = {
-  disponivel: 'Disponível',
+  disponivel: 'DisponÃ­vel',
   vencimento: 'Vencimento',
-  transito: 'Trânsito',
+  transito: 'TrÃ¢nsito',
   divergente: 'Divergente',
   excesso: 'Excesso'
 };
@@ -80,7 +81,7 @@ export interface Movement {
   location: string;
   reason: string;
   orderId?: string;
-  warehouseId: string; // NOVO: Armazém onde ocorreu a movimentação
+  warehouseId: string; // NOVO: ArmazÃ©m onde ocorreu a movimentaÃ§Ã£o
 }
 
 export interface InventoryItem {
@@ -100,7 +101,7 @@ export interface InventoryItem {
   safetyStock: number;
   abcCategory?: 'A' | 'B' | 'C';
   lastCountedAt?: string;
-  warehouseId: string; // NOVO: Armazém onde o item está localizado
+  warehouseId: string; // NOVO: ArmazÃ©m onde o item estÃ¡ localizado
 }
 
 export interface Quote {
@@ -118,18 +119,30 @@ export interface Quote {
 
 export interface ApprovalRecord {
   id: string;
-  action: 'approved' | 'rejected';
+  action: 'approved' | 'rejected' | 'status_changed';
   by: string;
   at: string;
   reason?: string;
+  description?: string;
+  status?: PurchaseOrderStatus;
 }
+
+export type PurchaseOrderStatus =
+  | 'rascunho'
+  | 'requisicao'
+  | 'cotacao'
+  | 'pendente'
+  | 'aprovado'
+  | 'enviado'
+  | 'recebido'
+  | 'cancelado';
 
 export interface PurchaseOrder {
   id: string;
   vendor: string;
   requestDate: string;
   items: { sku: string; name: string; qty: number; price: number }[];
-  status: 'rascunho' | 'requisicao' | 'cotacao' | 'pendente' | 'aprovado' | 'enviado' | 'recebido' | 'cancelado';
+  status: PurchaseOrderStatus;
   total: number;
   priority: 'normal' | 'urgente';
   requester?: string;
@@ -144,7 +157,7 @@ export interface PurchaseOrder {
   approvalHistory?: ApprovalRecord[];
   plate?: string;
   costCenter?: string;
-  warehouseId: string; // NOVO: Armazém de destino do pedido
+  warehouseId: string; // NOVO: ArmazÃ©m de destino do pedido
 }
 
 export interface Vendor {
@@ -162,7 +175,7 @@ export interface Vehicle {
   model: string;
   type: string; // Expanded to support API types like LANCHA, PASSEIO, etc.
   lastMaintenance: string;
-  status: 'Disponível' | 'Em Viagem' | 'Manutenção' | string;
+  status: 'DisponÃ­vel' | 'Em Viagem' | 'ManutenÃ§Ã£o' | string;
   costCenter?: string;
 }
 
@@ -176,7 +189,7 @@ export interface User {
   avatar: string;
   modules: Module[];
   password?: string;
-  allowedWarehouses: string[]; // NOVO: Armazéns que o usuário pode acessar
+  allowedWarehouses: string[]; // NOVO: ArmazÃ©ns que o usuÃ¡rio pode acessar
 }
 export interface AppNotification {
   id: string;
@@ -196,7 +209,7 @@ export interface CyclicBatch {
   accuracyRate?: number;
   totalItems: number;
   divergentItems: number;
-  warehouseId: string; // NOVO: Armazém onde o inventário está sendo realizado
+  warehouseId: string; // NOVO: ArmazÃ©m onde o inventÃ¡rio estÃ¡ sendo realizado
 }
 
 export interface CyclicCount {
@@ -218,3 +231,4 @@ export interface CostCenter {
   budget: number;
   status: 'Ativo' | 'Inativo';
 }
+

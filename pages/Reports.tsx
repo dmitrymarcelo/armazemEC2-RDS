@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { PurchaseOrder } from '../types';
+import { parseDateLike } from '../utils/dateTime';
 
 const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders }) => {
   const [periodDays, setPeriodDays] = useState(30);
@@ -20,15 +21,7 @@ const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders })
     const inFlux = activePOs.length;
     const finalizedTotal = completedPOs.length + canceledPOs.length;
 
-    const parseDate = (d: string) => {
-      try {
-        const [datePart] = d.split(',');
-        const [day, month, year] = datePart.split('/').map(Number);
-        return new Date(year, month - 1, day);
-      } catch (e) {
-        return new Date(0);
-      }
-    };
+    const parseDate = (d: string) => parseDateLike(d) || new Date(0);
 
     const ordersInPeriod = orders.filter(o => parseDate(o.requestDate) >= periodStart);
 
@@ -258,7 +251,13 @@ const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders })
             <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
               <div className="flex items-center gap-4">
                 <div className="size-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
-                  <span className="material-symbols-outlined !text-2xl">analytics</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 3v18h18" />
+                    <path d="M8 14v4" />
+                    <path d="M12 10v8" />
+                    <path d="M16 6v12" />
+                    <path d="M20 12v6" />
+                  </svg>
                 </div>
                 <div>
                   <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Detalhes: {selectedMetric.label}</h3>
@@ -269,7 +268,10 @@ const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders })
                 onClick={() => setSelectedMetric(null)}
                 className="size-10 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-all active:scale-90"
               >
-                <span className="material-symbols-outlined text-slate-400">close</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="size-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
               </button>
             </div>
 
@@ -326,7 +328,9 @@ const ProcurementDashboard: React.FC<{ orders: PurchaseOrder[] }> = ({ orders })
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-20 opacity-30 text-slate-400">
-                    <span className="material-symbols-outlined !text-6xl mb-4">folder_open</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="size-14 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    </svg>
                     <p className="font-black uppercase tracking-widest">Nenhum pedido encontrado</p>
                   </div>
                 )}

@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { PurchaseOrder, Vendor, InventoryItem, Quote, User, PO_STATUS_LABELS, CyclicBatch, CyclicCount, Vehicle } from '../types';
 import { PaginationBar } from '../components/PaginationBar';
+import { formatDatePtBR, formatDateTimePtBR, splitDateTimePtBR } from '../utils/dateTime';
 
 interface PurchaseOrdersProps {
   user: User;
@@ -102,12 +103,7 @@ const StatusProgressBar: React.FC<{ order: PurchaseOrder }> = ({ order }) => {
     : steps.findIndex(s => s.status === status);
 
   const formatDateTime = (dateStr?: string) => {
-    if (!dateStr) return { date: '--/--/----', time: '--:--' };
-    const parts = dateStr.split(', ');
-    return {
-      date: parts[0] || dateStr,
-      time: parts[1] || '00:00'
-    };
+    return splitDateTimePtBR(dateStr, '--/--/----', '--:--');
   };
 
   return (
@@ -221,12 +217,22 @@ const StatusProgressBar: React.FC<{ order: PurchaseOrder }> = ({ order }) => {
             {/* Log de Aprovação/Rejeição do Histórico */}
             {(order.approvalHistory || []).slice().reverse().map((log, lidx) => {
               const { date, time } = formatDateTime(log.at);
+              const isRejected = log.action === 'rejected';
+              const isApproved = log.action === 'approved';
+              const isStatusChange = log.action === 'status_changed';
+              const statusLabel = log.status ? PO_STATUS_LABELS[log.status] : '';
+              const description = isRejected
+                ? `REJEITADO: ${log.reason || 'Sem justificativa'}`
+                : isApproved
+                  ? 'APROVADO POR GESTOR'
+                  : (log.description || (statusLabel ? `STATUS ALTERADO: ${statusLabel}` : 'STATUS ALTERADO'));
+
               return (
-                <tr key={`log-${lidx}`} className={log.action === 'rejected' ? "bg-red-50/30 dark:bg-red-900/10" : "bg-emerald-50/30 dark:bg-emerald-900/10"}>
-                  <td className={`px-6 py-4 text-[11px] font-bold ${log.action === 'rejected' ? 'text-red-600' : 'text-emerald-600'}`}>{date}</td>
-                  <td className={`px-6 py-4 text-[11px] font-bold ${log.action === 'rejected' ? 'text-red-600' : 'text-emerald-600'}`}>{time}</td>
-                  <td className={`px-6 py-4 text-[11px] font-black uppercase ${log.action === 'rejected' ? 'text-red-600' : 'text-emerald-600'} tracking-widest`}>
-                    {log.action === 'rejected' ? `REJEITADO: ${log.reason}` : 'APROVADO POR GESTOR'}
+                <tr key={`log-${lidx}`} className={isRejected ? "bg-red-50/30 dark:bg-red-900/10" : isStatusChange ? "bg-blue-50/30 dark:bg-blue-900/10" : "bg-emerald-50/30 dark:bg-emerald-900/10"}>
+                  <td className={`px-6 py-4 text-[11px] font-bold ${isRejected ? 'text-red-600' : isStatusChange ? 'text-blue-600' : 'text-emerald-600'}`}>{date}</td>
+                  <td className={`px-6 py-4 text-[11px] font-bold ${isRejected ? 'text-red-600' : isStatusChange ? 'text-blue-600' : 'text-emerald-600'}`}>{time}</td>
+                  <td className={`px-6 py-4 text-[11px] font-black uppercase ${isRejected ? 'text-red-600' : isStatusChange ? 'text-blue-600' : 'text-emerald-600'} tracking-widest`}>
+                    {description}
                   </td>
                 </tr>
               );
@@ -425,7 +431,7 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
     const newPO: PurchaseOrder = {
       id: `PO-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
       vendor: 'A definir via cotações',
-      requestDate: new Date().toLocaleDateString('pt-BR'),
+      requestDate: formatDateTimePtBR(new Date(), '--/--/---- --:--:--'),
       status: 'requisicao',
       priority,
       total: 0,
@@ -556,10 +562,10 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
         vendorName: vendors.find(v => v.id === quote1Vendor)?.name || '',
         items: quotingPO.items.map(item => ({ sku: item.sku, unitPrice: parseFloat(quote1Price) / quotingPO.items.reduce((sum, i) => sum + i.qty, 0), leadTime: quote1Valid ? '7 dias' : '' })),
         totalValue: parseFloat(quote1Price),
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
+        validUntil: formatDatePtBR(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), '--/--/----'),
         notes: quote1Notes,
         quotedBy: 'Comprador',
-        quotedAt: new Date().toLocaleString('pt-BR'),
+        quotedAt: formatDateTimePtBR(new Date(), '--/--/---- --:--:--'),
         isSelected: false
       });
     }
@@ -571,10 +577,10 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
         vendorName: vendors.find(v => v.id === quote2Vendor)?.name || '',
         items: quotingPO.items.map(item => ({ sku: item.sku, unitPrice: parseFloat(quote2Price) / quotingPO.items.reduce((sum, i) => sum + i.qty, 0), leadTime: quote2Valid ? '7 dias' : '' })),
         totalValue: parseFloat(quote2Price),
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
+        validUntil: formatDatePtBR(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), '--/--/----'),
         notes: quote2Notes,
         quotedBy: 'Comprador',
-        quotedAt: new Date().toLocaleString('pt-BR'),
+        quotedAt: formatDateTimePtBR(new Date(), '--/--/---- --:--:--'),
         isSelected: false
       });
     }
@@ -586,10 +592,10 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
         vendorName: vendors.find(v => v.id === quote3Vendor)?.name || '',
         items: quotingPO.items.map(item => ({ sku: item.sku, unitPrice: parseFloat(quote3Price) / quotingPO.items.reduce((sum, i) => sum + i.qty, 0), leadTime: quote3Valid ? '7 dias' : '' })),
         totalValue: parseFloat(quote3Price),
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
+        validUntil: formatDatePtBR(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), '--/--/----'),
         notes: quote3Notes,
         quotedBy: 'Comprador',
-        quotedAt: new Date().toLocaleString('pt-BR'),
+        quotedAt: formatDateTimePtBR(new Date(), '--/--/---- --:--:--'),
         isSelected: false
       });
     }
@@ -852,7 +858,6 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                             key={v.plate}
                             type="button"
                             onClick={() => {
-                              console.log('🚗 Veículo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
                               setPlate(v.plate);
                               setCostCenter(v.costCenter || '');
                               setIsPlateSearchOpen(false);
@@ -860,7 +865,21 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                             className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all text-left"
                           >
                             <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                              <span className="material-symbols-outlined text-sm">local_shipping</span>
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="size-4"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M10 17h4V5H2v12h3" />
+                                <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5" />
+                                <circle cx="7.5" cy="17.5" r="2.5" />
+                                <circle cx="17.5" cy="17.5" r="2.5" />
+                              </svg>
                             </div>
                             <div>
                               <p className="text-xs font-black text-slate-800 dark:text-white uppercase">{v.plate}</p>
@@ -1628,7 +1647,10 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Pedido {sendingPO.id}</p>
               </div>
               <button onClick={() => { setIsSendModalOpen(false); setVendorOrderNum(''); }} className="size-12 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-400 hover:text-red-500 transition-all">
-                <span className="material-symbols-outlined">close</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
               </button>
             </div>
 

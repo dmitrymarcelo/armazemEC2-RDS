@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Movement } from '../types';
 import { PaginationBar } from '../components/PaginationBar';
+import { splitDateTimePtBR } from '../utils/dateTime';
 
 interface MovementsProps {
   movements: Movement[];
@@ -33,8 +34,8 @@ export const Movements: React.FC<MovementsProps> = ({
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
         <div>
-          <h2 className="text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Movimentacoes do Sistema</h2>
-          <p className="text-slate-500 text-sm font-medium mt-1">Registro cronologico de alteracoes de saldo e enderecamento.</p>
+          <h2 className="text-4xl font-black tracking-tighter text-slate-800 dark:text-white">Movimentações do Sistema</h2>
+          <p className="text-slate-500 text-sm font-medium mt-1">Registro cronológico de alterações de saldo e endereçamento.</p>
         </div>
 
         <div className="flex gap-4">
@@ -58,7 +59,7 @@ export const Movements: React.FC<MovementsProps> = ({
               </svg>
             </div>
             <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">Saidas</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">Saídas</p>
               <p className="text-xl font-black text-slate-800 dark:text-white">{stats.saidas}</p>
             </div>
           </div>
@@ -104,11 +105,13 @@ export const Movements: React.FC<MovementsProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredMovements.length > 0 ? (
-                filteredMovements.map((move) => (
+                filteredMovements.map((move) => {
+                  const when = splitDateTimePtBR(move.timestamp);
+                  return (
                   <tr key={move.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
                     <td className="px-8 py-5">
-                      <p className="text-xs font-black text-slate-800 dark:text-white leading-tight">{move.timestamp?.split(' ')[0] || '-'}</p>
-                      <p className="text-[10px] text-slate-400 font-bold">{move.timestamp?.split(' ')[1] || '-'}</p>
+                      <p className="text-xs font-black text-slate-800 dark:text-white leading-tight">{when.date}</p>
+                      <p className="text-[10px] text-slate-400 font-bold">{when.time}</p>
                     </td>
                     <td className="px-8 py-5 text-center">
                       <span className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tight ${move.type === 'entrada' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
@@ -144,7 +147,7 @@ export const Movements: React.FC<MovementsProps> = ({
                       <p className="text-xs font-medium text-slate-500 italic">"{move.reason}"</p>
                     </td>
                   </tr>
-                ))
+                )})
               ) : (
                 <tr>
                   <td colSpan={7} className="px-8 py-20 text-center text-slate-400 font-black uppercase text-xs tracking-widest">

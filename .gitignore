@@ -52,6 +52,8 @@ antigravity-awesome-skills/
 fetch_test.*
 test-*.js
 metadata.json
+playwright-report/
+test-results/
 
 # OS files
 Thumbs.db

@@ -1,7 +1,7 @@
-
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { InventoryItem, INVENTORY_STATUS_LABELS } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
+import { PaginationBar } from '../components/PaginationBar';
 
 interface InventoryProps {
   items?: InventoryItem[];
@@ -22,6 +22,13 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
   const [leadTime, setLeadTime] = useState<number>(7);
   const [safetyStock, setSafetyStock] = useState<number>(5);
   const [calculatedStatus, setCalculatedStatus] = useState<InventoryItem['status']>('disponivel');
+  
+  // Estados para paginacao
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50; // Limite razoavel para renderizacao
+  
+  // Estados para busca
+  const [searchTerm, setSearchTerm] = useState('');
 
   const computeStatus = (qty: number, max: number, min: number, loc: string, exp: string): InventoryItem['status'] => {
     const safeLoc = (loc || '').toUpperCase();
@@ -68,6 +75,24 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
     }
   };
 
+  // Filtrar itens com base no termo de busca
+  const filteredItems = items.filter(item => 
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.location?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Calcular itens para a pagina atual
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentItems = filteredItems.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  
+  // Resetar para a primeira pagina quando os itens mudarem ou a busca mudar
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [items, searchTerm]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
@@ -76,16 +101,40 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
           <p className="text-slate-500 text-sm font-medium">Visualização unificada de saldos por Código de Produto no CD Manaus.</p>
         </div>
 
-        <button
-          onClick={onRecalculateROP}
-          className="px-6 py-3.5 bg-amber-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95 flex items-center gap-3"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
-          Recalcular ROP Dinâmico
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* Campo de busca */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Buscar produtos..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm font-bold text-slate-700 dark:text-white focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={onRecalculateROP}
+            className="px-6 py-3.5 bg-amber-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95 flex items-center gap-3"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+            Recalcular ROP Dinâmico
+          </button>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -102,68 +151,100 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {items.map((item, idx) => (
-                <tr key={item.sku} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors group">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-4">
-                      <img src={item.imageUrl} alt={item.name} className="size-14 rounded-2xl object-cover border-2 border-white dark:border-slate-800 shadow-sm" />
-                      <div>
-                        <p className="text-sm font-black text-slate-800 dark:text-white truncate max-w-[200px]">{item.name}</p>
-                        <span className="text-[10px] font-black text-primary uppercase tracking-wider">Cód. Produto: {item.sku}</span>
+              {currentItems.length > 0 ? (
+                currentItems.map((item, idx) => (
+                  <tr key={item.sku} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors group">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-4">
+                        <img src={item.imageUrl} alt={item.name} className="size-14 rounded-2xl object-cover border-2 border-white dark:border-slate-800 shadow-sm" />
+                        <div>
+                          <p className="text-sm font-black text-slate-800 dark:text-white truncate max-w-[200px]">{item.name}</p>
+                          <span className="text-[10px] font-black text-primary uppercase tracking-wider">Cód. Produto: {item.sku}</span>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <button
-                      onClick={() => { setSelectedItem(item); setIsQRModalOpen(true); }}
-                      className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-primary/10 hover:text-primary transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-700"
-                    >
-                      <QRCodeSVG value={item.sku} size={20} />
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="text-[10px] font-black px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
-                      {item.location}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className={`text-sm font-black ${item.quantity < item.minQty ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}`}>
-                        {item.quantity} {item.unit || 'un.'}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => { setSelectedItem(item); setIsQRModalOpen(true); }}
+                        className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-primary/10 hover:text-primary transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-700"
+                      >
+                        <QRCodeSVG value={item.sku} size={20} />
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="text-[10px] font-black px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                        {item.location}
                       </span>
-                      <div className="flex flex-col gap-0.5 mt-1">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Min: {item.minQty} | Max: {item.maxQty}</span>
-                        <span className="text-[9px] font-black text-primary/70 uppercase">Lead Time: {item.leadTime || 7}d | Segurança: {item.safetyStock || 5}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className={`text-sm font-black ${item.quantity < item.minQty ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                          {item.quantity} {item.unit || 'un.'}
+                        </span>
+                        <div className="flex flex-col gap-0.5 mt-1">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase">Min: {item.minQty} | Max: {item.maxQty}</span>
+                          <span className="text-[9px] font-black text-primary/70 uppercase">Lead Time: {item.leadTime || 7}d | Segurança: {item.safetyStock || 5}</span>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tight ${item.status === 'disponivel' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                      item.status === 'vencimento' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
-                        item.status === 'excesso' ? 'bg-purple-50 text-purple-600 border border-purple-100' :
-                          item.status === 'divergente' ? 'bg-red-50 text-red-600 border border-red-100' :
-                            'bg-blue-50 text-blue-600 border border-blue-100'
-                      }`}>
-                      {INVENTORY_STATUS_LABELS[item.status]}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => handleOpenOps(item)}
-                      className="px-4 py-2.5 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ml-auto shadow-lg shadow-primary/20 hover:bg-blue-600 transition-all active:scale-95"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                        <circle cx="12" cy="12" r="3" />
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tight ${item.status === 'disponivel' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                        item.status === 'vencimento' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+                          item.status === 'excesso' ? 'bg-purple-50 text-purple-600 border border-purple-100' :
+                            item.status === 'divergente' ? 'bg-red-50 text-red-600 border border-red-100' :
+                              'bg-blue-50 text-blue-600 border border-blue-100'
+                        }`}>
+                        {INVENTORY_STATUS_LABELS[item.status]}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => handleOpenOps(item)}
+                        className="px-4 py-2.5 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ml-auto shadow-lg shadow-primary/20 hover:bg-blue-600 transition-all active:scale-95"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        Operar Ativo
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="size-12 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 8v4" />
+                        <path d="M12 16h.01" />
                       </svg>
-                      Operar Ativo
-                    </button>
+                      <p className="text-slate-500 font-black text-sm">Nenhum produto encontrado</p>
+                      {searchTerm && (
+                        <p className="text-slate-400 text-xs">Tente usar outros termos de busca</p>
+                      )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
+        
+        {filteredItems.length > ITEMS_PER_PAGE && (
+          <div className="border-t border-slate-100 dark:border-slate-800">
+            <PaginationBar
+              currentPage={currentPage}
+              currentCount={currentItems.length}
+              pageSize={ITEMS_PER_PAGE}
+              hasNextPage={currentPage < totalPages}
+              isLoading={false}
+              itemLabel="itens"
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        )}
       </div>
 
       {isOpsModalOpen && selectedItem && (
@@ -333,3 +414,4 @@ export const Inventory: React.FC<InventoryProps> = ({ items = [], onUpdateItem, 
     </div>
   );
 };
+

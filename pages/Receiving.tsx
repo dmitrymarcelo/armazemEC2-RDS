@@ -14,7 +14,7 @@ interface ReceivingItem {
 }
 
 interface ReceivingProps {
-  onFinalize: (items: ReceivingItem[], poId?: string) => void;
+  onFinalize: (items: ReceivingItem[], poId?: string) => Promise<boolean>;
   availablePOs: PurchaseOrder[];
 }
 
@@ -23,6 +23,7 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
   const [items, setItems] = useState<ReceivingItem[]>([]);
   const [barcode, setBarcode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   // Carregar itens do PO selecionado
   useEffect(() => {
@@ -77,11 +78,29 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
     })));
   };
 
-  const handleTotalReceipt = () => {
+  const finalizeReceipt = async (targetItems: ReceivingItem[], targetPoId: string) => {
+    if (isFinalizing) return;
+
+    const validItems = targetItems.filter((item) => item.received > 0);
+    if (!targetPoId || validItems.length === 0) return;
+
+    setIsFinalizing(true);
+    try {
+      const success = await onFinalize(validItems, targetPoId);
+      if (success) {
+        setSelectedPO('');
+        setItems([]);
+      }
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
+  const handleTotalReceipt = async () => {
     if (!selectedPO) return;
 
     const confirmed = window.confirm(
-      "Atenção: O recebimento total ignora a conferência item a item. Certifique-se de que a carga física corresponde exatamente à Nota Fiscal para evitar furos de estoque. Confirmar entrada total?"
+      'Atencao: o recebimento total ignora a conferencia item a item. Confirme apenas se a carga fisica estiver correta. Confirmar entrada total?'
     );
 
     if (confirmed) {
@@ -91,7 +110,7 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
         status: 'ok' as const
       }));
       setItems(fullItems);
-      onFinalize(fullItems, selectedPO);
+      await finalizeReceipt(fullItems, selectedPO);
     }
   };
 
@@ -132,18 +151,19 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
           {selectedPO && (
             <button
               onClick={handleTotalReceipt}
+              disabled={isFinalizing}
               className="px-6 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-black hover:bg-slate-200 transition-all h-10 border border-slate-200 dark:border-slate-700"
             >
-              RECEBIMENTO TOTAL
+              {isFinalizing ? 'PROCESSANDO...' : 'RECEBIMENTO TOTAL'}
             </button>
           )}
 
           <button
-            onClick={() => onFinalize(items.filter(i => i.received > 0), selectedPO)}
-            disabled={!selectedPO || !items.some(i => i.received > 0)}
+            onClick={() => void finalizeReceipt(items, selectedPO)}
+            disabled={isFinalizing || !selectedPO || !items.some(i => i.received > 0)}
             className="px-6 py-2 bg-primary text-white rounded-xl text-xs font-black shadow-lg shadow-primary/20 hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full h-10"
           >
-            FINALIZAR E ENVIAR AO ESTOQUE
+            {isFinalizing ? 'FINALIZANDO...' : 'FINALIZAR E ENVIAR AO ESTOQUE'}
           </button>
         </div>
       </div>
@@ -170,9 +190,10 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
               <select
                 value={selectedPO}
                 onChange={(e) => setSelectedPO(e.target.value)}
+                disabled={isFinalizing}
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-xl font-black text-sm transition-all"
               >
-                <option value="">Escolha um PO aprovado...</option>
+                <option value="">Escolha um PO enviado...</option>
                 {availablePOs.map(po => (
                   <option key={po.id} value={po.id}>
                     {po.id} - {po.vendor} ({po.items.length} itens)
@@ -181,7 +202,7 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
               </select>
               {availablePOs.length === 0 && (
                 <p className="text-xs text-amber-500 font-bold mt-2">
-                  ⚠️ Nenhum PO aprovado disponível para recebimento
+                  ⚠️ Nenhum PO enviado disponivel para recebimento
                 </p>
               )}
               {selectedPO && (
@@ -202,6 +223,7 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
                     autoFocus
                     value={barcode}
                     onChange={(e) => setBarcode(e.target.value)}
+                    disabled={isFinalizing}
                     className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border-none rounded-xl font-mono text-lg focus:ring-2 focus:ring-primary transition-all"
                     placeholder="EAN ou Cód. Produto..."
                     type="text"
@@ -220,7 +242,7 @@ export const Receiving: React.FC<ReceivingProps> = ({ onFinalize, availablePOs }
 
               <button
                 type="submit"
-                disabled={isScanning || !barcode}
+                disabled={isFinalizing || isScanning || !barcode}
                 className="w-full py-4 bg-slate-900 dark:bg-slate-100 dark:text-slate-900 text-white font-black rounded-xl hover:bg-black transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 {isScanning ? 'PROCESSANDO...' : 'REGISTRAR LEITURA'}

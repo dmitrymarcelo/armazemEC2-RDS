@@ -5,9 +5,10 @@ import { TopBar } from './components/TopBar';
 import { WarehouseSelector } from './components/WarehouseSelector';
 import type { MaterialRequest } from './pages/Expedition';
 type RequestStatus = 'aprovacao' | 'separacao' | 'entregue';
-import { Module, InventoryItem, Activity, Movement, Vendor, Vehicle, PurchaseOrder, Quote, ApprovalRecord, User, AppNotification, CyclicBatch, CyclicCount, Warehouse } from './types';
+import { Module, InventoryItem, Activity, Movement, Vendor, Vehicle, PurchaseOrder, Quote, ApprovalRecord, User, AppNotification, CyclicBatch, CyclicCount, Warehouse, PurchaseOrderStatus } from './types';
 import { LoginPage } from './components/LoginPage';
 import { api, AUTH_TOKEN_KEY } from './api-client';
+import { formatDateTimePtBR, formatTimePtBR, parseDateLike } from './utils/dateTime';
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Receiving = lazy(() => import('./pages/Receiving').then((module) => ({ default: module.Receiving })));
@@ -22,6 +23,9 @@ const PurchaseOrders = lazy(() =>
 );
 const MasterData = lazy(() => import('./pages/MasterData').then((module) => ({ default: module.MasterData })));
 const Reports = lazy(() => import('./pages/Reports').then((module) => ({ default: module.Reports })));
+const GeneralAudit = lazy(() =>
+  import('./pages/GeneralAudit').then((module) => ({ default: module.GeneralAudit }))
+);
 const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })));
 
 
@@ -31,6 +35,7 @@ export const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [inventoryWarehouseScope, setInventoryWarehouseScope] = useState<string>('');
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -52,6 +57,7 @@ export const App: React.FC = () => {
   const [isPurchaseOrdersFullyLoaded, setIsPurchaseOrdersFullyLoaded] = useState(false);
   const [isMovementsFullyLoaded, setIsMovementsFullyLoaded] = useState(false);
   const [isMaterialRequestsFullyLoaded, setIsMaterialRequestsFullyLoaded] = useState(false);
+  const [isInventoryFullyLoaded, setIsInventoryFullyLoaded] = useState(false);
   const [isDeferredModuleLoading, setIsDeferredModuleLoading] = useState(false);
   const [movementsPage, setMovementsPage] = useState(1);
   const [purchaseOrdersPage, setPurchaseOrdersPage] = useState(1);
@@ -67,23 +73,78 @@ export const App: React.FC = () => {
   const [isMaterialRequestsPageLoading, setIsMaterialRequestsPageLoading] = useState(false);
 
   const fullLoadInFlight = useRef<Set<string>>(new Set());
+  const loadBootstrapDataRef = useRef<((warehouseId?: string) => Promise<void>) | null>(null);
   const pageFetchSequence = useRef({
     movements: 0,
     purchaseOrders: 0,
     materialRequests: 0
   });
 
-  const INITIAL_PURCHASE_ORDERS_LIMIT = 1200;
-  const INITIAL_MOVEMENTS_LIMIT = 1200;
-  const INITIAL_MATERIAL_REQUESTS_LIMIT = 1200;
-  const MOVEMENTS_PAGE_SIZE = 120;
-  const PURCHASE_ORDERS_PAGE_SIZE = 60;
-  const MATERIAL_REQUESTS_PAGE_SIZE = 60;
+  const INITIAL_INVENTORY_LIMIT = 100; // Reduzido de 500 para melhorar desempenho
+  const INITIAL_PURCHASE_ORDERS_LIMIT = 100; // Reduzido de 300
+  const INITIAL_MOVEMENTS_LIMIT = 100; // Reduzido de 300
+  const INITIAL_MATERIAL_REQUESTS_LIMIT = 100; // Reduzido de 300
+  const MOVEMENTS_PAGE_SIZE = 50; // Reduzido de 120
+  const PURCHASE_ORDERS_PAGE_SIZE = 30; // Reduzido de 60
+  const MATERIAL_REQUESTS_PAGE_SIZE = 30; // Reduzido de 60
+
+  const toPtBrDateTime = (value: unknown, fallback = ''): string => {
+    const parsed = formatDateTimePtBR(value, fallback);
+    if (parsed) return parsed;
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+    return fallback;
+  };
+
+  const toIsoDateTime = (value: unknown): string | null => {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+
+    const text = String(value).trim();
+    if (!text) return null;
+
+    const parsed = parseDateLike(text);
+    if (!parsed) return null;
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  };
+
+  const nowIso = () => new Date().toISOString();
+
+  const generateUuid = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+
+    // Fallback RFC4122-ish UUID for environments without crypto.randomUUID.
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+      const rand = Math.floor(Math.random() * 16);
+      const value = char === 'x' ? rand : (rand & 0x3) | 0x8;
+      return value.toString(16);
+    });
+  };
+
+  const createPOStatusHistoryEntry = (
+    status: PurchaseOrderStatus,
+    description: string,
+    actor = user?.name || 'Sistema'
+  ): ApprovalRecord => ({
+    id: generateUuid(),
+    action: 'status_changed',
+    by: actor,
+    at: nowIso(),
+    status,
+    description
+  });
+
+  const appendPOHistory = (
+    history: ApprovalRecord[] | undefined,
+    entry: ApprovalRecord
+  ): ApprovalRecord[] => [...(history || []), entry];
 
   const mapPurchaseOrders = (rows: any[]): PurchaseOrder[] => rows.map((po: any) => ({
     id: po.id,
     vendor: po.vendor,
-    requestDate: po.request_date,
+    requestDate: toPtBrDateTime(po.request_date),
     status: po.status,
     priority: po.priority,
     total: po.total,
@@ -91,13 +152,23 @@ export const App: React.FC = () => {
     items: po.items,
     quotes: po.quotes,
     selectedQuoteId: po.selected_quote_id,
-    sentToVendorAt: po.sent_to_vendor_at,
-    receivedAt: po.received_at,
-    quotesAddedAt: po.quotes_added_at,
-    approvedAt: po.approved_at,
-    rejectedAt: po.rejected_at,
+    sentToVendorAt: toPtBrDateTime(po.sent_to_vendor_at),
+    receivedAt: toPtBrDateTime(po.received_at),
+    quotesAddedAt: toPtBrDateTime(po.quotes_added_at),
+    approvedAt: toPtBrDateTime(po.approved_at),
+    rejectedAt: toPtBrDateTime(po.rejected_at),
     vendorOrderNumber: po.vendor_order_number,
-    approvalHistory: po.approval_history,
+    approvalHistory: Array.isArray(po.approval_history)
+      ? po.approval_history.map((entry: any) => ({
+        id: entry.id,
+        action: entry.action,
+        by: entry.by || 'Sistema',
+        at: toPtBrDateTime(entry.at),
+        reason: entry.reason,
+        description: entry.description,
+        status: entry.status
+      }))
+      : [],
     warehouseId: po.warehouse_id || 'ARMZ28'
   }));
 
@@ -107,7 +178,7 @@ export const App: React.FC = () => {
     productName: m.product_name || m.name || 'Produto Indefinido',
     type: m.type as Movement['type'],
     quantity: m.quantity,
-    timestamp: m.timestamp || new Date().toISOString(),
+    timestamp: toPtBrDateTime(m.timestamp, formatDateTimePtBR(new Date(), '')),
     user: m.user || 'Sistema',
     location: m.location || 'N/A',
     reason: m.reason || 'Sem motivo registrado',
@@ -124,10 +195,51 @@ export const App: React.FC = () => {
     dept: r.dept,
     priority: r.priority,
     status: r.status,
-    timestamp: new Date(r.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    timestamp: formatTimePtBR(r.created_at, '--:--'),
     costCenter: r.cost_center,
     warehouseId: r.warehouse_id
   }));
+
+  const mapInventoryRows = (rows: any[]): InventoryItem[] => rows.map((item: any) => ({
+    sku: item.sku,
+    name: item.name,
+    location: item.location,
+    batch: item.batch,
+    expiry: item.expiry,
+    quantity: item.quantity,
+    status: item.status,
+    imageUrl: item.image_url,
+    category: item.category,
+    abcCategory: item.abc_category,
+    lastCountedAt: item.last_counted_at,
+    unit: item.unit || 'UN',
+    minQty: item.min_qty,
+    maxQty: item.max_qty,
+    leadTime: item.lead_time || 7,
+    safetyStock: item.safety_stock || 5,
+    warehouseId: item.warehouse_id || 'ARMZ28'
+  }));
+
+  const loadInventoryForWarehouse = async (warehouseId: string, limit = INITIAL_INVENTORY_LIMIT) => {
+    const safeLimit = Math.max(1, limit);
+    const { data } = await api
+      .from('inventory')
+      .select('*')
+      .eq('warehouse_id', warehouseId)
+      .order('created_at', { ascending: false })
+      .limit(safeLimit + 1);
+
+    if (!data) {
+      setInventory([]);
+      setInventoryWarehouseScope(warehouseId);
+      setIsInventoryFullyLoaded(true);
+      return;
+    }
+
+    setInventory(mapInventoryRows(data.slice(0, safeLimit)));
+    setInventoryWarehouseScope(warehouseId);
+    setIsInventoryFullyLoaded(data.length <= safeLimit);
+  };
 
   const loadDeferredDataset = async (
     key: 'purchase_orders' | 'movements' | 'material_requests',
@@ -299,7 +411,7 @@ export const App: React.FC = () => {
 
   // API Data Fetching
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchData = async (warehouseId = activeWarehouse) => {
       try {
         const { data: whData } = await api.from('warehouses').select('*').eq('is_active', true);
         if (whData) setWarehouses(whData.map((w: any) => ({
@@ -312,33 +424,14 @@ export const App: React.FC = () => {
           managerEmail: w.manager_email
         })));
 
-        const { data: invData } = await api.from('inventory').select('*');
-        if (invData) setInventory(invData.map((item: any) => ({
-          sku: item.sku,
-          name: item.name,
-          location: item.location,
-          batch: item.batch,
-          expiry: item.expiry,
-          quantity: item.quantity,
-          status: item.status,
-          imageUrl: item.image_url,
-          category: item.category,
-          abcCategory: item.abc_category,
-          lastCountedAt: item.last_counted_at,
-          unit: item.unit || 'UN',
-          minQty: item.min_qty,
-          maxQty: item.max_qty,
-          leadTime: item.lead_time || 7,
-          safetyStock: item.safety_stock || 5,
-          warehouseId: item.warehouse_id || 'ARMZ28'
-        })));
+        await loadInventoryForWarehouse(warehouseId, INITIAL_INVENTORY_LIMIT);
 
         const { data: batchesData } = await api.from('cyclic_batches').select('*').order('created_at', { ascending: false });
         if (batchesData) setCyclicBatches(batchesData.map((b: any) => ({
           id: b.id,
           status: b.status,
-          scheduledDate: b.scheduled_date,
-          completedAt: b.completed_at,
+          scheduledDate: toPtBrDateTime(b.scheduled_date),
+          completedAt: toPtBrDateTime(b.completed_at),
           accuracyRate: b.accuracy_rate,
           totalItems: b.total_items,
           divergentItems: b.divergent_items,
@@ -362,7 +455,7 @@ export const App: React.FC = () => {
         if (userData) {
           const mappedUsers = userData.map((u: any) => ({
             ...u,
-            lastAccess: u.last_access,
+            lastAccess: toPtBrDateTime(u.last_access),
             modules: Array.isArray(u.modules) ? u.modules : (u.modules ? JSON.parse(u.modules) : []),
             allowedWarehouses: Array.isArray(u.allowed_warehouses) ? u.allowed_warehouses : (u.allowed_warehouses ? JSON.parse(u.allowed_warehouses) : ['ARMZ28'])
           }));
@@ -418,6 +511,8 @@ export const App: React.FC = () => {
       }
     };
 
+    loadBootstrapDataRef.current = fetchData;
+
     const initAuth = async () => {
       setIsLoading(true);
       try {
@@ -425,7 +520,7 @@ export const App: React.FC = () => {
         if (savedToken) {
           api.setAuthToken(savedToken);
           // Carrega dados apenas quando há sessão autenticada.
-          await fetchData();
+          await fetchData(activeWarehouse);
         } else {
           localStorage.removeItem('logged_user');
         }
@@ -446,7 +541,9 @@ export const App: React.FC = () => {
     initAuth();
 
     // Subscribe removed - using refresh on action
-    return () => { };
+    return () => {
+      loadBootstrapDataRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -477,24 +574,14 @@ export const App: React.FC = () => {
   }, [activeModule, user, activeWarehouse, materialRequestsPage]);
 
   useEffect(() => {
-    if (activeModule !== 'movimentacoes') return;
     if (!user) return;
-    void fetchMovementsPage(movementsPage);
-  }, [movements]);
+    if (inventoryWarehouseScope === activeWarehouse) return;
+    void loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+  }, [user, activeWarehouse, inventoryWarehouseScope]);
 
   useEffect(() => {
-    if (activeModule !== 'compras') return;
     if (!user) return;
-    void fetchPurchaseOrdersPage(purchaseOrdersPage);
-  }, [purchaseOrders]);
 
-  useEffect(() => {
-    if (activeModule !== 'expedicao') return;
-    if (!user) return;
-    void fetchMaterialRequestsPage(materialRequestsPage);
-  }, [materialRequests]);
-
-  useEffect(() => {
     pageFetchSequence.current.movements += 1;
     pageFetchSequence.current.purchaseOrders += 1;
     pageFetchSequence.current.materialRequests += 1;
@@ -509,7 +596,7 @@ export const App: React.FC = () => {
     setHasMoreMovements(false);
     setHasMorePurchaseOrders(false);
     setHasMoreMaterialRequests(false);
-  }, [activeWarehouse]);
+  }, [activeWarehouse, user]);
 
   // Auto-logout after 10 minutes of inactivity
   useEffect(() => {
@@ -545,7 +632,7 @@ export const App: React.FC = () => {
       email: newUser.email,
       role: newUser.role,
       status: newUser.status,
-      last_access: newUser.lastAccess,
+      last_access: toIsoDateTime(newUser.lastAccess),
       avatar: newUser.avatar,
       password: newUser.password,
       modules: newUser.modules,
@@ -607,7 +694,7 @@ export const App: React.FC = () => {
       type,
       title,
       subtitle,
-      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      time: formatTimePtBR(new Date(), '--:--')
     };
     setActivities(prev => [newActivity, ...prev.slice(0, 19)]);
   };
@@ -650,9 +737,11 @@ export const App: React.FC = () => {
   };
 
   const recordMovement = async (type: Movement['type'], item: InventoryItem, quantity: number, reason: string, orderId?: string) => {
+    const movementTimestampIso = nowIso();
+    const movementId = generateUuid();
     const newMovement: Movement = {
-      id: `MOV-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: new Date().toLocaleString('pt-BR'),
+      id: movementId,
+      timestamp: toPtBrDateTime(movementTimestampIso, formatDateTimePtBR(new Date(), '')),
       type,
       sku: item.sku,
       productName: item.name,
@@ -665,8 +754,8 @@ export const App: React.FC = () => {
     };
 
     const { error } = await api.from('movements').insert({
-      id: newMovement.id,
-      timestamp: newMovement.timestamp,
+      id: movementId,
+      timestamp: movementTimestampIso,
       type: newMovement.type,
       sku: newMovement.sku,
       product_name: newMovement.productName,
@@ -680,6 +769,9 @@ export const App: React.FC = () => {
 
     if (!error) {
       setMovements(prev => [newMovement, ...prev]);
+      if (newMovement.warehouseId === activeWarehouse && movementsPage === 1) {
+        setPagedMovements(prev => [newMovement, ...prev].slice(0, MOVEMENTS_PAGE_SIZE));
+      }
     } else {
       console.error('Error recording movement:', error);
     }
@@ -695,11 +787,15 @@ export const App: React.FC = () => {
 
         const neededQty = Math.max(0, item.maxQty - item.quantity);
         if (neededQty <= 0) continue;
+        const createdAtIso = nowIso();
+        const initialHistory = [
+          createPOStatusHistoryEntry('requisicao', 'Pedido automático gerado por regra de estoque crítico')
+        ];
 
         const autoPO: PurchaseOrder = {
           id: `AUTO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           vendor: 'A definir via cotações',
-          requestDate: new Date().toLocaleDateString('pt-BR'),
+          requestDate: toPtBrDateTime(createdAtIso, formatDateTimePtBR(new Date(), '')),
           status: 'requisicao',
           priority: 'urgente',
           total: 0,
@@ -710,23 +806,26 @@ export const App: React.FC = () => {
             qty: neededQty,
             price: 0
           }],
+          approvalHistory: initialHistory,
           warehouseId: activeWarehouse // NOVO
         };
 
         const { error } = await api.from('purchase_orders').insert({
           id: autoPO.id,
           vendor: autoPO.vendor,
-          request_date: autoPO.requestDate,
+          request_date: createdAtIso,
           status: autoPO.status,
           priority: autoPO.priority,
           total: autoPO.total,
           requester: autoPO.requester,
           items: autoPO.items,
+          approval_history: initialHistory,
           warehouse_id: activeWarehouse
         });
 
         if (!error) {
           setPurchaseOrders(prev => [autoPO, ...prev]);
+          setPagedPurchaseOrders(prev => [autoPO, ...prev].slice(0, PURCHASE_ORDERS_PAGE_SIZE));
           addActivity('alerta', 'Reposição Automática', `Pedido gerado para ${item.sku} (Saldo: ${item.quantity})`);
           addNotification(
             `Estoque Crítico: ${item.sku}`,
@@ -742,23 +841,32 @@ export const App: React.FC = () => {
     const po = purchaseOrders.find(o => o.id === id);
     if (!po) return;
 
+    const approvedAtIso = nowIso();
+    const approvedAtDisplay = toPtBrDateTime(approvedAtIso, formatDateTimePtBR(new Date(), ''));
     const approvalRecord: ApprovalRecord = {
-      id: `APR-${Date.now()}`,
+      id: generateUuid(),
       action: 'approved',
-      by: 'Gestor de Compras',
-      at: new Date().toLocaleString('pt-BR')
+      by: user?.name || 'Gestor de Compras',
+      at: approvedAtIso,
+      status: 'aprovado',
+      description: 'Aprovado por gestor'
     };
+    const statusRecord = createPOStatusHistoryEntry('aprovado', 'Aprovação financeira e operacional concluída');
 
-    const newApprovalHistory = [...(po.approvalHistory || []), approvalRecord];
+    const newApprovalHistory = appendPOHistory(
+      appendPOHistory(po.approvalHistory, approvalRecord),
+      statusRecord
+    );
 
     const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'aprovado',
       approval_history: newApprovalHistory,
-      approved_at: approvalRecord.at
+      approved_at: approvedAtIso
     });
 
     if (!error) {
-      setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'aprovado', approvalHistory: newApprovalHistory, approvedAt: approvalRecord.at } : o));
+      setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'aprovado', approvalHistory: newApprovalHistory, approvedAt: approvedAtDisplay } : o));
+      setPagedPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'aprovado', approvalHistory: newApprovalHistory, approvedAt: approvedAtDisplay } : o));
       addActivity('compra', 'Aprovação de Pedido', `Requisição ${id} aprovada - pronta para envio`);
       addNotification(
         `Aprovação: ${id}`,
@@ -773,24 +881,33 @@ export const App: React.FC = () => {
     const po = purchaseOrders.find(o => o.id === id);
     if (!po) return;
 
+    const rejectedAtIso = nowIso();
+    const rejectedAtDisplay = toPtBrDateTime(rejectedAtIso, formatDateTimePtBR(new Date(), ''));
     const rejectionRecord: ApprovalRecord = {
-      id: `REJ-${Date.now()}`,
+      id: generateUuid(),
       action: 'rejected',
-      by: 'Gestor de Compras',
-      at: new Date().toLocaleString('pt-BR'),
-      reason: reason || 'Sem justificativa'
+      by: user?.name || 'Gestor de Compras',
+      at: rejectedAtIso,
+      reason: reason || 'Sem justificativa',
+      status: 'requisicao',
+      description: 'Rejeitado e retornado para nova cotação'
     };
+    const statusRecord = createPOStatusHistoryEntry('requisicao', `Pedido retornado para cotação. Motivo: ${reason || 'Sem justificativa'}`);
 
-    const newApprovalHistory = [...(po.approvalHistory || []), rejectionRecord];
+    const newApprovalHistory = appendPOHistory(
+      appendPOHistory(po.approvalHistory, rejectionRecord),
+      statusRecord
+    );
 
     const { error } = await api.from('purchase_orders').eq('id', id).update({
       status: 'requisicao', // Volta para o início do fluxo
       approval_history: newApprovalHistory,
-      rejected_at: rejectionRecord.at
+      rejected_at: rejectedAtIso
     });
 
     if (!error) {
-      setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'requisicao', approvalHistory: newApprovalHistory, rejectedAt: rejectionRecord.at } : o));
+      setPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'requisicao', approvalHistory: newApprovalHistory, rejectedAt: rejectedAtDisplay } : o));
+      setPagedPurchaseOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'requisicao', approvalHistory: newApprovalHistory, rejectedAt: rejectedAtDisplay } : o));
 
       // Criar log de movimentação para métricas (auditoria de fluxo)
       await recordMovement('ajuste', { sku: 'N/A', name: `PEDIDO ${id}`, location: 'ADMIN' } as any, 0, `Rejeição: ${reason || 'Sem justificativa'}`, id);
@@ -813,11 +930,9 @@ export const App: React.FC = () => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const relevantMovements = movements.filter(m => {
-      // Formato: "02/02/2026 15:30:00" ou similar
-      const [datePart] = m.timestamp.split(' ');
-      const [day, month, year] = datePart.split('/').map(Number);
-      const mDate = new Date(year, month - 1, day);
-      return m.type === 'saida' && mDate >= thirtyDaysAgo;
+      const movementDate = parseDateLike(m.timestamp);
+      if (!movementDate) return false;
+      return m.type === 'saida' && movementDate >= thirtyDaysAgo;
     });
 
     // 2. Calcular Uso Diário Médio (ADU) por SKU
@@ -886,13 +1001,15 @@ export const App: React.FC = () => {
 
           if (updatedItems.length === 0) {
             // Rejeita/Cancela o pedido se ficar vazio
-            await api.from('purchase_orders').eq('id', auto.id).update({ status: 'rejeitado' });
-            setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, status: 'rejeitado' as const } : p));
+            await api.from('purchase_orders').eq('id', auto.id).update({ status: 'cancelado' });
+            setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, status: 'cancelado' as const } : p));
+            setPagedPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, status: 'cancelado' as const } : p));
             showNotification(`Pedido AUTO ${auto.id} cancelado: suprido por manual.`, 'success');
           } else {
             // Atualiza quantidades
             await api.from('purchase_orders').eq('id', auto.id).update({ items: updatedItems });
             setPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, items: updatedItems } : p));
+            setPagedPurchaseOrders(prev => prev.map(p => p.id === auto.id ? { ...p, items: updatedItems } : p));
           }
         }
       }
@@ -900,7 +1017,18 @@ export const App: React.FC = () => {
   };
 
   const handleCreatePO = async (newOrder: PurchaseOrder) => {
-    const orderWithStatus: PurchaseOrder = { ...newOrder, status: 'requisicao', warehouseId: activeWarehouse };
+    const createdAtIso = nowIso();
+    const initialHistory = appendPOHistory(
+      newOrder.approvalHistory,
+      createPOStatusHistoryEntry('requisicao', 'Pedido criado via painel LogiWMS')
+    );
+    const orderWithStatus: PurchaseOrder = {
+      ...newOrder,
+      status: 'requisicao',
+      warehouseId: activeWarehouse,
+      requestDate: toPtBrDateTime(createdAtIso, formatDateTimePtBR(new Date(), '')),
+      approvalHistory: initialHistory
+    };
     const { error } = await api.from('purchase_orders').insert({
       id: orderWithStatus.id,
       vendor: orderWithStatus.vendor,
@@ -911,7 +1039,8 @@ export const App: React.FC = () => {
       items: orderWithStatus.items,
       plate: orderWithStatus.plate,
       cost_center: orderWithStatus.costCenter,
-      request_date: new Date().toLocaleString('pt-BR'),
+      request_date: createdAtIso,
+      approval_history: initialHistory,
       warehouse_id: activeWarehouse
     });
 
@@ -920,22 +1049,35 @@ export const App: React.FC = () => {
       await handleSyncAutoPOs(orderWithStatus.items.map(i => ({ sku: i.sku, qty: i.qty })));
 
       setPurchaseOrders(prev => [orderWithStatus, ...prev]);
+      setPagedPurchaseOrders(prev => [orderWithStatus, ...prev].slice(0, PURCHASE_ORDERS_PAGE_SIZE));
       addActivity('compra', 'Nova Requisição', `Pedido manual ${orderWithStatus.id} criado - aguardando cotações`);
       showNotification(`Pedido ${orderWithStatus.id} criado! Adicione 3 cotações para prosseguir.`, 'success');
     }
   };
 
   const handleAddQuotes = async (poId: string, quotes: Quote[]) => {
-    const quotesAddedAt = new Date().toLocaleString('pt-BR');
+    const po = purchaseOrders.find((entry) => entry.id === poId);
+    if (!po) return;
+
+    const quotesAddedAtIso = nowIso();
+    const quotesAddedAt = toPtBrDateTime(quotesAddedAtIso, formatDateTimePtBR(new Date(), ''));
+    const newApprovalHistory = appendPOHistory(
+      po.approvalHistory,
+      createPOStatusHistoryEntry('cotacao', 'Cotação de fornecedores vinculada')
+    );
     const { error } = await api.from('purchase_orders').eq('id', poId).update({
       quotes,
       status: 'cotacao',
-      quotes_added_at: quotesAddedAt
+      quotes_added_at: quotesAddedAtIso,
+      approval_history: newApprovalHistory
     });
 
     if (!error) {
       setPurchaseOrders(prev => prev.map(o =>
-        o.id === poId ? { ...o, quotes, status: 'cotacao' as const, quotesAddedAt } : o
+        o.id === poId ? { ...o, quotes, status: 'cotacao' as const, quotesAddedAt, approvalHistory: newApprovalHistory } : o
+      ));
+      setPagedPurchaseOrders(prev => prev.map(o =>
+        o.id === poId ? { ...o, quotes, status: 'cotacao' as const, quotesAddedAt, approvalHistory: newApprovalHistory } : o
       ));
       showNotification(`Cotações adicionadas ao pedido ${poId}`, 'success');
     }
@@ -949,13 +1091,18 @@ export const App: React.FC = () => {
     if (!selectedQuote) return;
 
     const updatedQuotes = po.quotes?.map(q => ({ ...q, isSelected: q.id === selectedQuoteId }));
+    const newApprovalHistory = appendPOHistory(
+      po.approvalHistory,
+      createPOStatusHistoryEntry('pendente', 'Pedido enviado para aprovação do gestor')
+    );
 
     const { error } = await api.from('purchase_orders').eq('id', poId).update({
       selected_quote_id: selectedQuoteId,
       vendor: selectedQuote.vendorName,
       total: selectedQuote.totalValue,
       status: 'pendente',
-      quotes: updatedQuotes
+      quotes: updatedQuotes,
+      approval_history: newApprovalHistory
     });
 
     if (!error) {
@@ -965,7 +1112,17 @@ export const App: React.FC = () => {
         vendor: selectedQuote.vendorName,
         total: selectedQuote.totalValue,
         status: 'pendente' as const,
-        quotes: updatedQuotes
+        quotes: updatedQuotes,
+        approvalHistory: newApprovalHistory
+      } : o));
+      setPagedPurchaseOrders(prev => prev.map(o => o.id === poId ? {
+        ...o,
+        selectedQuoteId,
+        vendor: selectedQuote.vendorName,
+        total: selectedQuote.totalValue,
+        status: 'pendente' as const,
+        quotes: updatedQuotes,
+        approvalHistory: newApprovalHistory
       } : o));
       addActivity('compra', 'Cotações Enviadas', `Pedido ${poId} enviado para aprovação do gestor`);
       addNotification(
@@ -978,11 +1135,20 @@ export const App: React.FC = () => {
   };
 
   const handleMarkAsSent = async (poId: string, vendorOrderNumber: string) => {
-    const sentAt = new Date().toLocaleString('pt-BR');
+    const po = purchaseOrders.find((entry) => entry.id === poId);
+    if (!po) return;
+
+    const sentAtIso = nowIso();
+    const sentAt = toPtBrDateTime(sentAtIso, formatDateTimePtBR(new Date(), ''));
+    const newApprovalHistory = appendPOHistory(
+      po.approvalHistory,
+      createPOStatusHistoryEntry('enviado', `Pedido enviado ao fornecedor (Nº ${vendorOrderNumber})`)
+    );
     const { error } = await api.from('purchase_orders').eq('id', poId).update({
       status: 'enviado',
       vendor_order_number: vendorOrderNumber,
-      sent_to_vendor_at: sentAt
+      sent_to_vendor_at: sentAtIso,
+      approval_history: newApprovalHistory
     });
 
     if (!error) {
@@ -991,11 +1157,21 @@ export const App: React.FC = () => {
           ...o,
           status: 'enviado' as const,
           vendorOrderNumber,
-          sentToVendorAt: sentAt
+          sentToVendorAt: sentAt,
+          approvalHistory: newApprovalHistory
+        } : o
+      ));
+      setPagedPurchaseOrders(prev => prev.map(o =>
+        o.id === poId ? {
+          ...o,
+          status: 'enviado' as const,
+          vendorOrderNumber,
+          sentToVendorAt: sentAt,
+          approvalHistory: newApprovalHistory
         } : o
       ));
       addActivity('compra', 'Pedido Enviado', `PO ${poId} despachado ao fornecedor - Nº ${vendorOrderNumber}`);
-      showNotification(`Pedido ${poId} marked as sent!`, 'success');
+      showNotification(`Pedido ${poId} marcado como enviado!`, 'success');
     }
   };
 
@@ -1105,192 +1281,596 @@ export const App: React.FC = () => {
   };
 
   const handleCreateCyclicBatch = async (items: { sku: string, expected: number }[]) => {
+    const normalizedItems = items
+      .map((item) => ({
+        sku: String(item.sku || '').trim(),
+        expected: Number.parseInt(String(item.expected ?? 0), 10),
+      }))
+      .filter((item) => item.sku.length > 0 && Number.isFinite(item.expected) && item.expected >= 0);
+
+    if (normalizedItems.length === 0) {
+      showNotification('Nenhum item válido para criar lote de inventário.', 'warning');
+      return null;
+    }
+
     const batchId = `INV-${Date.now()}`;
+    const scheduledAt = nowIso();
     const { error: batchError } = await api.from('cyclic_batches').insert({
       id: batchId,
       status: 'aberto',
-      total_items: items.length,
+      scheduled_date: scheduledAt,
+      total_items: normalizedItems.length,
+      divergent_items: 0,
       warehouse_id: activeWarehouse
     });
 
-    if (!batchError) {
-      const counts = items.map(item => ({
+    if (batchError) {
+      showNotification(`Erro ao criar lote de inventário: ${String(batchError)}`, 'error');
+      return null;
+    }
+
+    const countsPayload = normalizedItems.map((item) => {
+      const id = generateUuid();
+      return {
+        id,
         batch_id: batchId,
         sku: item.sku,
         expected_qty: item.expected,
-        status: 'pendente'
-      }));
+        counted_qty: null,
+        status: 'pendente',
+        warehouse_id: activeWarehouse
+      };
+    });
 
-      const { error: countsError } = await api.from('cyclic_counts').insert(counts);
-      if (!countsError) {
-        const { data: batches } = await api.from('cyclic_batches').select('*').eq('id', batchId);
-        const newBatch = Array.isArray(batches) ? batches[0] : batches;
-        if (newBatch) {
-          setCyclicBatches(prev => [{
-            id: newBatch.id,
-            status: newBatch.status,
-            scheduledDate: newBatch.scheduled_date,
-            totalItems: newBatch.total_items,
-            divergentItems: newBatch.divergent_items,
-            warehouseId: activeWarehouse // NOVO
-          }, ...prev]);
-        }
-        showNotification(`Lote ${batchId} criado com ${items.length} itens!`, 'success');
-        return batchId;
-      }
+    const { error: countsError } = await api.from('cyclic_counts').insert(countsPayload);
+    if (countsError) {
+      showNotification(`Lote criado, mas houve erro ao gerar contagens: ${String(countsError)}`, 'warning');
     }
-    showNotification('Erro ao criar lote de inventário', 'error');
-    return null;
+
+    const { data: batchRows } = await api.from('cyclic_batches').select('*').eq('id', batchId).limit(1);
+    const createdBatch = Array.isArray(batchRows) ? batchRows[0] : batchRows;
+
+    if (createdBatch) {
+      setCyclicBatches((prev) => [{
+        id: createdBatch.id,
+        status: createdBatch.status,
+        scheduledDate: toPtBrDateTime(createdBatch.scheduled_date, scheduledAt),
+        completedAt: toPtBrDateTime(createdBatch.completed_at),
+        accuracyRate: createdBatch.accuracy_rate,
+        totalItems: createdBatch.total_items,
+        divergentItems: createdBatch.divergent_items,
+        warehouseId: createdBatch.warehouse_id || activeWarehouse
+      }, ...prev]);
+    }
+
+    showNotification(`Lote ${batchId} criado com ${normalizedItems.length} itens!`, 'success');
+    return batchId;
   };
 
   const handleFinalizeCyclicBatch = async (batchId: string, counts: any[]) => {
-    const divergentItems = counts.filter(c => c.countedQty !== c.expectedQty).length;
-    const accuracyRate = ((counts.length - divergentItems) / counts.length) * 100;
+    if (!Array.isArray(counts) || counts.length === 0) {
+      showNotification('Não há itens para finalizar no lote.', 'warning');
+      return;
+    }
 
-    const { error: batchError } = await api.from('cyclic_batches').eq('id', batchId).update({
-      status: 'concluido',
-      completed_at: new Date().toISOString(),
-      accuracy_rate: accuracyRate,
-      divergent_items: divergentItems
-    });
+    const finalizedAt = nowIso();
+    const normalizedCounts = counts.map((count) => {
+      const expectedQty = Number.parseInt(String(count?.expectedQty ?? 0), 10);
+      const parsedCountedQty = Number.parseInt(String(count?.countedQty ?? expectedQty), 10);
+      const countedQty = Number.isFinite(parsedCountedQty) && parsedCountedQty >= 0 ? parsedCountedQty : expectedQty;
+      return {
+        ...count,
+        sourceId: count?.sourceId ? String(count.sourceId) : '',
+        sku: String(count?.sku || ''),
+        expectedQty: Number.isFinite(expectedQty) ? expectedQty : 0,
+        countedQty,
+        status: countedQty === expectedQty ? 'contado' : 'ajustado'
+      };
+    }).filter((count) => count.sku.length > 0);
 
-    if (!batchError) {
-      // Registrar movimentos de ajuste para divergências
-      for (const count of counts) {
-        if (count.countedQty !== count.expectedQty) {
-          const item = inventory.find(i => i.sku === count.sku);
-          if (item) {
-            const diff = count.countedQty - count.expectedQty;
-            await recordMovement('ajuste', item, Math.abs(diff), `Ajuste automático via Inventário Cíclico (${batchId})`);
+    if (normalizedCounts.length === 0) {
+      showNotification('Contagens invalidas para finalizacao.', 'error');
+      return;
+    }
 
-            // Atualizar estoque
-            await api.from('inventory').eq('sku', item.sku).update({
-              quantity: count.countedQty,
-              last_counted_at: new Date().toISOString()
-            });
-          }
-        } else {
-          // Apenas atualizar data de última contagem
-          await api.from('inventory').eq('sku', count.sku).update({
-            last_counted_at: new Date().toISOString()
-          });
-        }
+    const divergentItems = normalizedCounts.filter((count) => count.countedQty !== count.expectedQty).length;
+    const accuracyRate = ((normalizedCounts.length - divergentItems) / normalizedCounts.length) * 100;
+
+    const { error: batchError } = await api
+      .from('cyclic_batches')
+      .eq('id', batchId)
+      .eq('warehouse_id', activeWarehouse)
+      .update({
+        status: 'concluido',
+        completed_at: finalizedAt,
+        accuracy_rate: accuracyRate,
+        divergent_items: divergentItems
+      });
+
+    if (batchError) {
+      showNotification(`Erro ao finalizar lote ${batchId}: ${String(batchError)}`, 'error');
+      return;
+    }
+
+    let countUpdateFailures = 0;
+
+    for (const count of normalizedCounts) {
+      const countPayload = {
+        counted_qty: count.countedQty,
+        status: count.status,
+        counted_at: finalizedAt,
+        warehouse_id: activeWarehouse
+      };
+
+      let countUpdateResult: any = null;
+      if (count.sourceId) {
+        countUpdateResult = await api.from('cyclic_counts').eq('id', count.sourceId).update(countPayload);
       }
 
-      setCyclicBatches(prev => prev.map(b => b.id === batchId ? {
-        ...b,
-        status: 'concluido',
-        completedAt: new Date().toISOString(),
-        accuracyRate,
-        divergentItems
-      } : b));
+      if (!count.sourceId || countUpdateResult?.error) {
+        countUpdateResult = await api
+          .from('cyclic_counts')
+          .eq('batch_id', batchId)
+          .eq('sku', count.sku)
+          .update(countPayload);
+      }
 
-      // Atualizar estado local do inventário
-      const updatedInv = inventory.map(item => {
-        const count = counts.find(c => c.sku === item.sku);
-        if (count) {
-          return { ...item, quantity: count.countedQty, lastCountedAt: new Date().toISOString() };
+      if (countUpdateResult?.error) {
+        countUpdateFailures += 1;
+      }
+
+      const item = inventory.find((entry) => entry.sku === count.sku && entry.warehouseId === activeWarehouse);
+      if (!item) {
+        continue;
+      }
+
+      const diff = count.countedQty - count.expectedQty;
+      if (diff !== 0) {
+        await recordMovement(
+          'ajuste',
+          item,
+          Math.abs(diff),
+          `Ajuste automático via Inventário Cíclico (${batchId})`
+        );
+      }
+
+      await api
+        .from('inventory')
+        .eq('sku', item.sku)
+        .eq('warehouse_id', activeWarehouse)
+        .update({
+          quantity: count.countedQty,
+          last_counted_at: finalizedAt
+        });
+    }
+
+    setCyclicBatches((prev) => prev.map((batch) => (
+      batch.id === batchId
+        ? {
+          ...batch,
+          status: 'concluido',
+          completedAt: toPtBrDateTime(finalizedAt, finalizedAt),
+          accuracyRate,
+          divergentItems
         }
-        return item;
-      });
-      setInventory(updatedInv);
+        : batch
+    )));
 
-      addActivity('alerta', 'Inventário Finalizado', `Lote ${batchId} concluído com ${accuracyRate.toFixed(1)}% de acuracidade.`);
-      showNotification(`Inventário ${batchId} finalizado!`, 'success');
+    setInventory((prev) => prev.map((item) => {
+      if (item.warehouseId !== activeWarehouse) return item;
+      const count = normalizedCounts.find((entry) => entry.sku === item.sku);
+      if (!count) return item;
+      return {
+        ...item,
+        quantity: count.countedQty,
+        lastCountedAt: finalizedAt
+      };
+    }));
+
+    addActivity('alerta', 'Inventário Finalizado', `Lote ${batchId} concluído com ${accuracyRate.toFixed(1)}% de acuracidade.`);
+    showNotification(`Inventário ${batchId} finalizado!`, 'success');
+
+    if (countUpdateFailures > 0) {
+      showNotification(`${countUpdateFailures} registro(s) de contagem não puderam ser persistidos.`, 'warning');
     }
   };
 
   const handleClassifyABC = async () => {
-    // Analisar movimentos dos últimos 30 dias
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const PAGE_SIZE = 500;
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-    // Obter frequência de saída por SKU
-    const skuFrequency: Record<string, number> = {};
-    movements
-      .filter(m => m.type === 'saida') // && new Date(m.timestamp) > thirtyDaysAgo)
-      .forEach(m => {
-        skuFrequency[m.sku] = (skuFrequency[m.sku] || 0) + m.quantity;
+    const loadAllInventoryRows = async () => {
+      const rows: any[] = [];
+      let offset = 0;
+      while (true) {
+        const response = await api
+          .from('inventory')
+          .select('*')
+          .eq('warehouse_id', activeWarehouse)
+          .order('sku', { ascending: true })
+          .limit(PAGE_SIZE)
+          .offset(offset);
+
+        if (response?.error) {
+          throw new Error(String(response.error));
+        }
+
+        const chunk = Array.isArray(response?.data) ? response.data : [];
+        rows.push(...chunk);
+        if (chunk.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+      }
+      return rows;
+    };
+
+    const loadAllMovementsRows = async () => {
+      const rows: any[] = [];
+      let offset = 0;
+      while (true) {
+        const response = await api
+          .from('movements')
+          .select('*')
+          .eq('warehouse_id', activeWarehouse)
+          .order('timestamp', { ascending: false })
+          .limit(PAGE_SIZE)
+          .offset(offset);
+
+        if (response?.error) {
+          throw new Error(String(response.error));
+        }
+
+        const chunk = Array.isArray(response?.data) ? response.data : [];
+        rows.push(...chunk);
+        if (chunk.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+      }
+      return rows;
+    };
+
+    try {
+      const [inventoryRows, movementRows] = await Promise.all([loadAllInventoryRows(), loadAllMovementsRows()]);
+
+      if (inventoryRows.length === 0) {
+        showNotification('Não há itens no estoque para classificar.', 'warning');
+        return;
+      }
+
+      const cutoff = Date.now() - THIRTY_DAYS_MS;
+      const skuFrequency: Record<string, number> = {};
+      movementRows.forEach((movement) => {
+        if (movement?.type !== 'saida') return;
+        const timestamp = new Date(String(movement?.timestamp || '')).getTime();
+        if (!Number.isFinite(timestamp) || timestamp < cutoff) return;
+        const sku = String(movement?.sku || '');
+        if (!sku) return;
+        const qty = Number(movement?.quantity || 0);
+        skuFrequency[sku] = (skuFrequency[sku] || 0) + (Number.isFinite(qty) ? qty : 0);
       });
 
-    // Ordenar SKUs por frequência
-    const sortedSkus = inventory.map(item => ({
-      sku: item.sku,
-      freq: skuFrequency[item.sku] || 0
-    })).sort((a, b) => b.freq - a.freq);
+      const ranking = inventoryRows
+        .map((row) => ({
+          sku: String(row?.sku || ''),
+          freq: skuFrequency[String(row?.sku || '')] || 0
+        }))
+        .filter((entry) => entry.sku.length > 0)
+        .sort((a, b) => b.freq - a.freq);
 
-    const total = sortedSkus.length;
-    const aLimit = Math.ceil(total * 0.2);
-    const bLimit = Math.ceil(total * 0.5);
+      if (ranking.length === 0) {
+        showNotification('Não foi possível montar o ranking ABC.', 'warning');
+        return;
+      }
 
-    for (let i = 0; i < total; i++) {
-      let category: 'A' | 'B' | 'C' = 'C';
-      if (i < aLimit) category = 'A';
-      else if (i < bLimit) category = 'B';
+      const total = ranking.length;
+      const aLimit = Math.ceil(total * 0.2);
+      const bLimit = Math.ceil(total * 0.5);
 
-      await api.from('inventory').eq('sku', sortedSkus[i].sku).update({ abc_category: category });
+      const updates = ranking.map((entry, index) => {
+        let category: 'A' | 'B' | 'C' = 'C';
+        if (index < aLimit) category = 'A';
+        else if (index < bLimit) category = 'B';
+        return { sku: entry.sku, category };
+      });
+
+      const CHUNK_SIZE = 25;
+      let updateErrors = 0;
+      for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+        const chunk = updates.slice(i, i + CHUNK_SIZE);
+        const chunkResults = await Promise.all(
+          chunk.map(async (entry) => api
+            .from('inventory')
+            .eq('sku', entry.sku)
+            .eq('warehouse_id', activeWarehouse)
+            .update({ abc_category: entry.category }))
+        );
+        chunkResults.forEach((result) => {
+          if (result?.error) updateErrors += 1;
+        });
+      }
+
+      await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+      showNotification(
+        updateErrors > 0
+          ? `Classificacao ABC atualizada com ${updateErrors} falha(s).`
+          : 'Classificacao ABC atualizada com base no giro dos ultimos 30 dias.',
+        updateErrors > 0 ? 'warning' : 'success'
+      );
+    } catch (error: any) {
+      showNotification(`Erro na classificação ABC: ${String(error?.message || error)}`, 'error');
     }
-
-    // Recarregar inventário
-    const { data: invData } = await api.from('inventory').select('*');
-    if (invData) setInventory(invData.map((item: any) => ({
-      sku: item.sku,
-      name: item.name,
-      location: item.location,
-      batch: item.batch,
-      expiry: item.expiry,
-      quantity: item.quantity,
-      status: item.status,
-      imageUrl: item.image_url,
-      category: item.category,
-      abcCategory: item.abc_category,
-      lastCountedAt: item.last_counted_at,
-      unit: item.unit || 'UN',
-      minQty: item.min_qty,
-      maxQty: item.max_qty,
-      leadTime: item.lead_time || 7,
-      safetyStock: item.safety_stock || 5,
-      warehouseId: item.warehouse_id
-    })));
-
-    showNotification('Classificação ABC atualizada com base no giro mensal!', 'success');
   };
 
-  const handleFinalizeReceipt = async (receivedItems: any[], poId?: string) => {
-    const newInventory = [...inventory];
-    for (const received of receivedItems) {
-      const index = newInventory.findIndex(i => i.sku === received.sku);
-      if (index > -1) {
-        const item = newInventory[index];
-        const updatedQty = item.quantity + received.received;
+  const handleFinalizeReceipt = async (receivedItems: any[], poId?: string): Promise<boolean> => {
+    if (!poId) {
+      showNotification('Selecione um pedido para finalizar o recebimento.', 'warning');
+      return false;
+    }
 
-        const { error } = await api.from('inventory').eq('sku', item.sku).update({ quantity: updatedQty });
-        if (!error) {
-          newInventory[index] = { ...item, quantity: updatedQty };
-          await recordMovement('entrada', newInventory[index], received.received, `Entrada via Recebimento de ${poId || 'PO'}`, poId);
+    const normalizedItems = receivedItems
+      .map((item) => ({
+        sku: String(item?.sku || '').trim(),
+        received: Number.parseInt(String(item?.received ?? item?.qty ?? item?.quantity ?? 0), 10),
+      }))
+      .filter((item) => item.sku.length > 0 && Number.isFinite(item.received) && item.received > 0);
+
+    if (normalizedItems.length === 0) {
+      showNotification('Nenhum item valido para recebimento.', 'warning');
+      return false;
+    }
+
+    const isConflictError = (errorMessage: string, httpStatus: number) => {
+      const normalized = errorMessage.toLowerCase();
+      return (
+        httpStatus === 409 ||
+        normalized.includes('ja foi recebido') ||
+        normalized.includes('nao esta em status enviado')
+      );
+    };
+
+    const syncOrderFromServer = async () => {
+      const { data: latestOrderRows } = await api.from('purchase_orders').select('*').eq('id', poId).limit(1);
+      const latestOrderRow = Array.isArray(latestOrderRows) ? latestOrderRows[0] : null;
+      if (!latestOrderRow) return;
+
+      const latestOrder = mapPurchaseOrders([latestOrderRow])[0];
+      setPurchaseOrders((prev) =>
+        prev.map((po) =>
+          po.id === poId
+            ? { ...po, status: latestOrder.status, receivedAt: latestOrder.receivedAt }
+            : po
+        )
+      );
+      setPagedPurchaseOrders((prev) =>
+        prev.map((po) =>
+          po.id === poId
+            ? { ...po, status: latestOrder.status, receivedAt: latestOrder.receivedAt }
+            : po
+        )
+      );
+    };
+
+    const finalizeReceiptLegacy = async () => {
+      const { data: poRows, error: poReadError } = await api.from('purchase_orders').select('*').eq('id', poId).limit(1);
+      if (poReadError) {
+        return { ok: false, error: String(poReadError.message || 'Falha ao consultar pedido.') };
+      }
+
+      const poRow = Array.isArray(poRows) ? poRows[0] : null;
+      if (!poRow) {
+        return { ok: false, error: `Pedido ${poId} nao encontrado.` };
+      }
+
+      if (String(poRow.status) !== 'enviado') {
+        return {
+          ok: false,
+          conflict: true,
+          error: `Pedido ${poId} ja foi recebido ou nao esta em status enviado`,
+        };
+      }
+
+      const receivedAtIso = nowIso();
+      const receiptReason = `Entrada via Recebimento de ${poId}`;
+      const movementRows: any[] = [];
+      const inventoryUpdates: any[] = [];
+
+      for (const item of normalizedItems) {
+        const { data: inventoryRows, error: inventoryReadError } = await api
+          .from('inventory')
+          .select('*')
+          .eq('sku', item.sku)
+          .eq('warehouse_id', activeWarehouse)
+          .limit(1);
+
+        if (inventoryReadError) {
+          return { ok: false, error: String(inventoryReadError.message || `Falha ao consultar ${item.sku}.`) };
+        }
+
+        const inventoryRow = Array.isArray(inventoryRows) ? inventoryRows[0] : null;
+        if (!inventoryRow) {
+          return { ok: false, error: `Item ${item.sku} nao encontrado no armazem ${activeWarehouse}.` };
+        }
+
+        const previousQty = Number(inventoryRow.quantity || 0);
+        const newQty = previousQty + item.received;
+
+        const { error: inventoryUpdateError } = await api
+          .from('inventory')
+          .eq('sku', item.sku)
+          .eq('warehouse_id', activeWarehouse)
+          .update({ quantity: newQty });
+
+        if (inventoryUpdateError) {
+          return { ok: false, error: String(inventoryUpdateError.message || `Falha ao atualizar ${item.sku}.`) };
+        }
+
+        const movementId = generateUuid();
+        const movementTimestampIso = nowIso();
+        const { data: insertedMovements, error: movementInsertError } = await api.from('movements').insert({
+          id: movementId,
+          timestamp: movementTimestampIso,
+          type: 'entrada',
+          sku: item.sku,
+          product_name: inventoryRow.name || item.sku,
+          quantity: item.received,
+          user: user?.name || 'Sistema',
+          location: inventoryRow.location || 'DOCA-01',
+          reason: receiptReason,
+          order_id: poId,
+          warehouse_id: activeWarehouse,
+        });
+
+        if (movementInsertError) {
+          return { ok: false, error: String(movementInsertError.message || `Falha ao registrar movimento ${item.sku}.`) };
+        }
+
+        const insertedMovement = Array.isArray(insertedMovements) ? insertedMovements[0] : insertedMovements;
+        if (insertedMovement) movementRows.push(insertedMovement);
+
+        inventoryUpdates.push({
+          sku: item.sku,
+          previous_qty: previousQty,
+          received: item.received,
+          new_qty: newQty,
+        });
+      }
+
+      const { data: updatedPoRows, error: poUpdateError } = await api
+        .from('purchase_orders')
+        .eq('id', poId)
+        .update({ status: 'recebido', received_at: receivedAtIso });
+
+      if (poUpdateError) {
+        return { ok: false, error: String(poUpdateError.message || 'Falha ao atualizar status do pedido.') };
+      }
+
+      const updatedPo = Array.isArray(updatedPoRows) ? updatedPoRows[0] : updatedPoRows;
+      return {
+        ok: true,
+        data: {
+          po: updatedPo || { ...poRow, status: 'recebido', received_at: receivedAtIso },
+          inventory_updates: inventoryUpdates,
+          movements: movementRows,
+        },
+      };
+    };
+
+    try {
+      const receiptResponse = await api.from('receipts/finalize').insert({
+        po_id: poId,
+        warehouse_id: activeWarehouse,
+        items: normalizedItems,
+      });
+
+      let receiptData: any = null;
+      if (receiptResponse?.error) {
+        const responseError = String(receiptResponse.error || 'Falha ao finalizar recebimento.');
+        const httpStatus = Number(receiptResponse.httpStatus || 0);
+        const endpointUnavailable =
+          httpStatus === 404 ||
+          responseError.toLowerCase().includes('not found') ||
+          responseError.toLowerCase().includes('cannot post');
+
+        if (endpointUnavailable) {
+          const legacyResult = await finalizeReceiptLegacy();
+          if (!legacyResult.ok) {
+            const legacyError = String(legacyResult.error || 'Falha ao finalizar recebimento.');
+            const conflict = Boolean(legacyResult.conflict);
+            showNotification(
+              conflict ? `${legacyError} (bloqueado para evitar duplicidade)` : legacyError,
+              conflict ? 'warning' : 'error'
+            );
+            if (conflict) {
+              await syncOrderFromServer();
+            }
+            return false;
+          }
+          receiptData = legacyResult.data || {};
+        } else {
+          const conflict = isConflictError(responseError, httpStatus);
+          showNotification(
+            conflict ? `${responseError} (bloqueado para evitar duplicidade)` : responseError,
+            conflict ? 'warning' : 'error'
+          );
+
+          if (conflict) {
+            await syncOrderFromServer();
+          }
+          return false;
+        }
+      } else {
+        receiptData = receiptResponse?.data || {};
+      }
+
+      const poData = receiptData.po;
+      const inventoryUpdates = Array.isArray(receiptData.inventory_updates) ? receiptData.inventory_updates : [];
+      const movementRows = Array.isArray(receiptData.movements) ? receiptData.movements : [];
+      const receivedAt = toPtBrDateTime(poData?.received_at, formatDateTimePtBR(new Date(), ''));
+      const existingOrder = purchaseOrders.find((po) => po.id === poId);
+      const receiveHistoryEntry = createPOStatusHistoryEntry('recebido', 'Entrega realizada normalmente');
+      const mergedApprovalHistory = appendPOHistory(
+        existingOrder?.approvalHistory || (Array.isArray(poData?.approval_history) ? poData.approval_history : []),
+        receiveHistoryEntry
+      );
+
+      if (inventoryUpdates.length > 0) {
+        const qtyBySku = new Map<string, number>();
+        inventoryUpdates.forEach((entry: any) => {
+          const sku = String(entry?.sku || '').trim();
+          const qty = Number(entry?.new_qty);
+          if (sku && Number.isFinite(qty)) {
+            qtyBySku.set(sku, qty);
+          }
+        });
+
+        setInventory((prev) =>
+          prev.map((item) => {
+            if (item.warehouseId !== activeWarehouse) return item;
+            const nextQty = qtyBySku.get(item.sku);
+            if (nextQty === undefined) return item;
+            return { ...item, quantity: nextQty };
+          })
+        );
+      } else {
+        await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+      }
+
+      if (movementRows.length > 0) {
+        const mappedMovements = mapMovements(movementRows).filter((movement) => movement.warehouseId === activeWarehouse);
+        if (mappedMovements.length > 0) {
+          setMovements((prev) => [...mappedMovements, ...prev]);
         }
       }
-    }
-    setInventory(newInventory);
 
-    // Sincronizar com pedidos automáticos baseados no que foi recebido
-    await handleSyncAutoPOs(receivedItems.map(r => ({ sku: r.sku, qty: r.received })));
+      const historyUpdate = await api
+        .from('purchase_orders')
+        .eq('id', poId)
+        .update({ approval_history: mergedApprovalHistory });
 
-    if (poId) {
-      const receivedAt = new Date().toLocaleString('pt-BR');
-      const { error } = await api.from('purchase_orders').eq('id', poId).update({ status: 'recebido' });
-      if (!error) {
-        setPurchaseOrders(prev => prev.map(po => po.id === poId ? { ...po, status: 'recebido', receivedAt } : po));
-        addActivity('recebimento', 'Recebimento Finalizado', `Carga ${poId} conferida e armazenada`);
-        addNotification(
-          `Recebimento: ${poId}`,
-          `Carga recebida com sucesso. Estoque atualizado.`,
-          'success'
-        );
+      const effectiveHistory = mergedApprovalHistory;
+      if (historyUpdate?.error) {
+        showNotification('Recebimento concluído, mas houve falha ao persistir histórico detalhado do pedido.', 'warning');
       }
-    }
 
-    showNotification(`Recebimento finalizado${poId ? ` - ${poId}` : ''}`, 'success');
+      setPurchaseOrders((prev) =>
+        prev.map((po) => (po.id === poId ? { ...po, status: 'recebido' as const, receivedAt, approvalHistory: effectiveHistory } : po))
+      );
+      setPagedPurchaseOrders((prev) =>
+        prev.map((po) => (po.id === poId ? { ...po, status: 'recebido' as const, receivedAt, approvalHistory: effectiveHistory } : po))
+      );
+
+      await handleSyncAutoPOs(normalizedItems.map((item) => ({ sku: item.sku, qty: item.received })));
+
+      addActivity('recebimento', 'Recebimento Finalizado', `Carga ${poId} conferida e armazenada`);
+      addNotification(
+        `Recebimento: ${poId}`,
+        `Carga recebida com sucesso. Estoque atualizado.`,
+        'success'
+      );
+      showNotification(`Recebimento finalizado - ${poId}`, 'success');
+      return true;
+    } catch (error: any) {
+      showNotification(`Erro ao finalizar recebimento: ${error?.message || 'erro desconhecido'}`, 'error');
+      return false;
+    }
   };
 
   /* Function to Add Master Record (Item, Vendor, Vehicle, CostCenter) */
@@ -1381,13 +1961,14 @@ export const App: React.FC = () => {
           showNotification(`Erro ao atualizar veículo: ${error.message}`, 'error');
         }
       } else {
-        const newVehicle: Vehicle = { ...data, status: 'Disponível', lastMaintenance: new Date().toLocaleDateString('pt-BR') };
+        const maintenanceIso = nowIso();
+        const newVehicle: Vehicle = { ...data, status: 'Disponível', lastMaintenance: toPtBrDateTime(maintenanceIso) };
         const { error } = await api.from('vehicles').insert({
           plate: newVehicle.plate,
           model: newVehicle.model,
           type: newVehicle.type,
           status: newVehicle.status,
-          last_maintenance: newVehicle.lastMaintenance,
+          last_maintenance: maintenanceIso,
           cost_center: newVehicle.costCenter
         });
 
@@ -1430,7 +2011,7 @@ export const App: React.FC = () => {
         model: d.model,
         type: d.type,
         status: d.status,
-        last_maintenance: d.lastMaintenance,
+        last_maintenance: toIsoDateTime(d.lastMaintenance),
         cost_center: d.costCenter
       }));
     }
@@ -1439,9 +2020,7 @@ export const App: React.FC = () => {
 
     if (!error) {
       if (type === 'item' && insertedData) {
-        // Reload inventory to get full struct
-        const { data: invData } = await api.from('inventory').select('*');
-        if (invData) setInventory(invData.map(item => ({ ...item, sku: item.sku, imageUrl: item.image_url, minQty: item.min_qty, maxQty: item.max_qty, leadTime: item.lead_time, safetyStock: item.safety_stock })));
+        await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
       } else if (type === 'vendor') {
         setVendors(prev => [...prev, ...data]);
       } else if (type === 'vehicle') {
@@ -1496,7 +2075,7 @@ export const App: React.FC = () => {
         model: v.modelo_veiculo,
         type: v.des_tip_veic,
         status: v.id_ativo === 1 ? 'Disponível' : 'Manutenção',
-        last_maintenance: v.dta_ult_manut ? new Date(v.dta_ult_manut).toLocaleDateString('pt-BR') : 'Sem data',
+        last_maintenance: toIsoDateTime(v.dta_ult_manut),
         cost_center: v.centro_custo
       }));
 
@@ -1511,7 +2090,7 @@ export const App: React.FC = () => {
         model: v.model,
         type: v.type,
         status: v.status as any,
-        lastMaintenance: v.last_maintenance,
+        lastMaintenance: toPtBrDateTime(v.last_maintenance),
         costCenter: v.cost_center
       })));
 
@@ -1557,10 +2136,15 @@ export const App: React.FC = () => {
       return;
     }
 
+    const createdAtIso = nowIso();
+    const initialHistory = [
+      createPOStatusHistoryEntry('requisicao', 'Pedido automático gerado por regra de estoque crítico')
+    ];
+
     const autoPO: PurchaseOrder = {
       id: `AUTO-${Date.now()}`,
       vendor: 'A definir via cotações',
-      requestDate: new Date().toLocaleDateString('pt-BR'),
+      requestDate: toPtBrDateTime(createdAtIso, formatDateTimePtBR(new Date(), '')),
       status: 'requisicao',
       priority: 'urgente',
       total: 0,
@@ -1571,6 +2155,7 @@ export const App: React.FC = () => {
         qty: neededQty,
         price: 0
       }],
+      approvalHistory: initialHistory,
       warehouseId: activeWarehouse // NOVO
     };
 
@@ -1582,12 +2167,14 @@ export const App: React.FC = () => {
       total: autoPO.total,
       requester: autoPO.requester,
       items: autoPO.items,
-      request_date: new Date().toLocaleString('pt-BR'),
+      request_date: createdAtIso,
+      approval_history: initialHistory,
       warehouse_id: activeWarehouse
     });
 
     if (!error) {
       setPurchaseOrders(prev => [autoPO, ...prev]);
+      setPagedPurchaseOrders(prev => [autoPO, ...prev].slice(0, PURCHASE_ORDERS_PAGE_SIZE));
       addActivity('compra', 'Requisição Manual de Estoque', `Gerado PO ${autoPO.id} para item crítico`);
       showNotification(`Requisição criada com sucesso! Adicione as cotações.`, 'success');
     } else {
@@ -1602,6 +2189,7 @@ export const App: React.FC = () => {
       case 'dashboard': return 'Dashboard Operacional';
       case 'recebimento': return 'Recebimento de Cargas';
       case 'movimentacoes': return 'Auditoria de Movimentações';
+      case 'auditoria_geral': return 'Auditoria Geral';
       case 'estoque': return 'Gestão de Inventário';
       case 'expedicao': return 'Solicitações SA';
       case 'cadastro': return 'Cadastro de Mestres';
@@ -1630,8 +2218,10 @@ export const App: React.FC = () => {
     setUserWarehouses(allowed);
 
     // Garantir que o armazém ativo seja um dos permitidos
+    let targetWarehouse = activeWarehouse;
     if (allowed.length > 0 && !allowed.includes(activeWarehouse)) {
-      setActiveWarehouse(allowed[0]);
+      targetWarehouse = allowed[0];
+      setActiveWarehouse(targetWarehouse);
     }
 
     if (registerActivity) {
@@ -1639,7 +2229,19 @@ export const App: React.FC = () => {
     }
 
     if (token) {
-      window.location.reload();
+      const bootstrapData = loadBootstrapDataRef.current;
+      if (!bootstrapData) return;
+
+      setIsLoading(true);
+      void (async () => {
+        try {
+          await bootstrapData(targetWarehouse);
+        } catch (error) {
+          console.error('Erro ao carregar dados apos login:', error);
+        } finally {
+          setIsLoading(false);
+        }
+      })();
     }
   };
 
@@ -1687,7 +2289,12 @@ export const App: React.FC = () => {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  const handleUpdateInventoryQuantity = async (sku: string, qty: number) => {
+  const handleUpdateInventoryQuantity = async (
+    sku: string,
+    qty: number,
+    reason = 'Saída para Expedição',
+    orderId?: string
+  ) => {
     const item = inventory.find(i => i.sku === sku);
     if (!item) {
       showNotification(`Item ${sku} não encontrado no inventário.`, 'error');
@@ -1700,11 +2307,15 @@ export const App: React.FC = () => {
       return false;
     }
 
-    const { error } = await api.from('inventory').eq('sku', sku).update({ quantity: newQuantity });
+    const { error } = await api
+      .from('inventory')
+      .eq('sku', sku)
+      .eq('warehouse_id', activeWarehouse)
+      .update({ quantity: newQuantity });
 
     if (!error) {
       setInventory(prev => prev.map(i => i.sku === sku ? { ...i, quantity: newQuantity } : i));
-      await recordMovement('saida', item, qty, 'Saída para Expedição');
+      await recordMovement('saida', item, qty, reason, orderId);
       showNotification(`Estoque de ${sku} atualizado para ${newQuantity}.`, 'success');
       return true;
     } else {
@@ -1714,33 +2325,94 @@ export const App: React.FC = () => {
   };
 
   const handleRequestCreate = async (data: MaterialRequest) => {
+    const requestPayload = {
+      ...data,
+      warehouseId: data.warehouseId || activeWarehouse
+    };
+
     const { error } = await api.from('material_requests').insert({
-      id: data.id,
-      sku: data.sku,
-      name: data.name,
-      qty: data.qty,
-      plate: data.plate,
-      dept: data.dept,
-      priority: data.priority,
-      status: data.status,
-      cost_center: data.costCenter,
-      warehouse_id: activeWarehouse
+      id: requestPayload.id,
+      sku: requestPayload.sku,
+      name: requestPayload.name,
+      qty: requestPayload.qty,
+      plate: requestPayload.plate,
+      dept: requestPayload.dept,
+      priority: requestPayload.priority,
+      status: requestPayload.status,
+      cost_center: requestPayload.costCenter,
+      warehouse_id: requestPayload.warehouseId
     });
     if (error) {
       showNotification('Erro ao criar solicitação', 'error');
     } else {
-      setMaterialRequests(prev => [data, ...prev]);
+      setMaterialRequests(prev => [requestPayload, ...prev]);
+      if (materialRequestsPage === 1 && requestPayload.warehouseId === activeWarehouse) {
+        setPagedMaterialRequests(prev => [requestPayload, ...prev].slice(0, MATERIAL_REQUESTS_PAGE_SIZE));
+      }
+
+      await recordMovement(
+        'ajuste',
+        {
+          sku: requestPayload.sku,
+          name: requestPayload.name,
+          location: `SA-${requestPayload.dept || 'OPERACOES'}`,
+          batch: '-',
+          expiry: '',
+          quantity: 0,
+          status: 'disponivel',
+          imageUrl: '',
+          category: 'Solicitações SA',
+          unit: 'UN',
+          minQty: 0,
+          maxQty: 0,
+          leadTime: 0,
+          safetyStock: 0,
+          warehouseId: requestPayload.warehouseId || activeWarehouse
+        },
+        0,
+        `Solicitação SA ${requestPayload.id} criada para placa ${requestPayload.plate}`,
+        requestPayload.id
+      );
+
       showNotification('Solicitação criada com sucesso!', 'success');
-      addActivity('expedicao', 'Nova Solicitação SA', `Item ${data.sku} solicitado para veículo ${data.plate}`);
+      addActivity('expedicao', 'Nova Solicitação SA', `Item ${requestPayload.sku} solicitado para veículo ${requestPayload.plate}`);
     }
   };
 
   const handleRequestUpdate = async (id: string, status: RequestStatus) => {
+    const currentRequest = materialRequests.find(request => request.id === id);
     const { error } = await api.from('material_requests').update({ status }).eq('id', id);
     if (error) {
       showNotification('Erro ao atualizar status', 'error');
     } else {
       setMaterialRequests(prev => prev.map(request => request.id === id ? { ...request, status } : request));
+      setPagedMaterialRequests(prev => prev.map(request => request.id === id ? { ...request, status } : request));
+
+      if (currentRequest && currentRequest.status !== status) {
+        await recordMovement(
+          'ajuste',
+          {
+            sku: currentRequest.sku,
+            name: currentRequest.name,
+            location: `SA-${currentRequest.dept || 'OPERACOES'}`,
+            batch: '-',
+            expiry: '',
+            quantity: 0,
+            status: 'disponivel',
+            imageUrl: '',
+            category: 'Solicitações SA',
+            unit: 'UN',
+            minQty: 0,
+            maxQty: 0,
+            leadTime: 0,
+            safetyStock: 0,
+            warehouseId: currentRequest.warehouseId || activeWarehouse
+          },
+          0,
+          `Solicitação SA ${id}: ${currentRequest.status} -> ${status}`,
+          id
+        );
+      }
       showNotification('Status da solicitação atualizado!', 'success');
     }
   };
@@ -1779,14 +2451,18 @@ export const App: React.FC = () => {
                 notification.type === 'info' ? 'bg-blue-500 text-white border-blue-400' :
                   'bg-amber-500 text-white border-amber-400'
               }`}>
-              <span className="material-symbols-outlined">info</span>
+              <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
               <span className="font-bold text-sm">{notification.message}</span>
             </div>
           )}
 
           {isDeferredModuleLoading && (
             <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider shadow-xl">
-              Carregando dados completos do modulo...
+              Carregando dados completos do módulo...
             </div>
           )}
 
@@ -1809,7 +2485,7 @@ export const App: React.FC = () => {
               <div className="w-full flex items-center justify-center py-20">
                 <div className="flex items-center gap-3 text-slate-500">
                   <div className="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  <span className="text-xs font-black uppercase tracking-wider">Carregando modulo...</span>
+                  <span className="text-xs font-black uppercase tracking-wider">Carregando módulo...</span>
                 </div>
               </div>
             }
@@ -1835,6 +2511,9 @@ export const App: React.FC = () => {
                 isPageLoading={isMovementsPageLoading}
                 onPageChange={setMovementsPage}
               />
+            )}
+            {activeModule === 'auditoria_geral' && (
+              <GeneralAudit activeWarehouse={activeWarehouse} />
             )}
             {activeModule === 'estoque' && (
               <Inventory
@@ -1862,6 +2541,7 @@ export const App: React.FC = () => {
             )}
             {activeModule === 'inventario_ciclico' && (
               <CyclicInventory
+                activeWarehouse={activeWarehouse}
                 inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
                 batches={cyclicBatches.filter(b => b.warehouseId === activeWarehouse)}
                 onCreateBatch={handleCreateCyclicBatch}

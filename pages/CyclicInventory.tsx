@@ -1,390 +1,584 @@
-
-import React, { useState, useEffect } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { InventoryItem, CyclicBatch, CyclicCount } from '../types';
 import { api } from '../api-client';
+import { formatDateTimePtBR, splitDateTimePtBR, parseDateLike } from '../utils/dateTime';
 
 interface CyclicInventoryProps {
-    inventory: InventoryItem[];
-    batches: CyclicBatch[];
-    onCreateBatch: (items: { sku: string; expected: number }[]) => Promise<string | null>;
-    onFinalizeBatch: (batchId: string, counts: any[]) => Promise<void>;
-    onClassifyABC: () => Promise<void>;
+  activeWarehouse: string;
+  inventory: InventoryItem[];
+  batches: CyclicBatch[];
+  onCreateBatch: (items: { sku: string; expected: number }[]) => Promise<string | null>;
+  onFinalizeBatch: (batchId: string, counts: any[]) => Promise<void>;
+  onClassifyABC: () => Promise<void>;
 }
 
-export const CyclicInventory: React.FC<CyclicInventoryProps> = ({ inventory, batches, onCreateBatch, onFinalizeBatch, onClassifyABC }) => {
-    const [activeTab, setActiveTab] = useState<'batches' | 'accuracy'>('batches');
-    const [isNewBatchModalOpen, setIsNewBatchModalOpen] = useState(false);
-    const [isCountModalOpen, setIsCountModalOpen] = useState(false);
-    const [selectedBatch, setSelectedBatch] = useState<CyclicBatch | null>(null);
-    const [currentCounts, setCurrentCounts] = useState<CyclicCount[]>([]);
-    const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+interface CountRow extends CyclicCount {
+  inputKey: string;
+  sourceId?: string;
+}
 
-    // ABC Analysis summary
-    const abcStats = {
-        A: inventory.filter(i => i.abcCategory === 'A').length,
-        B: inventory.filter(i => i.abcCategory === 'B').length,
-        C: inventory.filter(i => i.abcCategory === 'C').length,
+interface DivergenceRow {
+  id: string;
+  batchId: string;
+  sku: string;
+  expectedQty: number;
+  countedQty: number;
+  diff: number;
+  severity: 'baixa' | 'media' | 'alta';
+  countedAt?: string;
+}
+
+const formatDate = (value?: string) => splitDateTimePtBR(value, '--/--/----', '--:--').date;
+const formatDateTime = (value?: string) => formatDateTimePtBR(value, '--/--/---- --:--');
+
+const clamp = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+
+const accuracyClass = (value: number) => {
+  if (value >= 99) return 'text-emerald-500';
+  if (value >= 95) return 'text-amber-500';
+  return 'text-red-500';
+};
+
+const SEVERITY_CLASS: Record<DivergenceRow['severity'], string> = {
+  alta: 'bg-red-100 text-red-600',
+  media: 'bg-amber-100 text-amber-600',
+  baixa: 'bg-slate-100 text-slate-600',
+};
+
+export const CyclicInventory: React.FC<CyclicInventoryProps> = ({
+  activeWarehouse,
+  inventory,
+  batches,
+  onCreateBatch,
+  onFinalizeBatch,
+  onClassifyABC,
+}) => {
+  const [activeTab, setActiveTab] = useState<'batches' | 'accuracy'>('batches');
+  const [isNewBatchModalOpen, setIsNewBatchModalOpen] = useState(false);
+  const [isCountModalOpen, setIsCountModalOpen] = useState(false);
+  const [selectedBatch, setSelectedBatch] = useState<CyclicBatch | null>(null);
+  const [counts, setCounts] = useState<CountRow[]>([]);
+  const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  const [divergences, setDivergences] = useState<DivergenceRow[]>([]);
+  const [isLoadingDivergences, setIsLoadingDivergences] = useState(false);
+  const [isClassifying, setIsClassifying] = useState(false);
+
+  const abc = useMemo(() => {
+    const A = inventory.filter((item) => item.abcCategory === 'A').length;
+    const B = inventory.filter((item) => item.abcCategory === 'B').length;
+    const C = inventory.filter((item) => item.abcCategory === 'C').length;
+    const total = Math.max(inventory.length, 1);
+    return {
+      A,
+      B,
+      C,
+      ratioA: clamp((A / total) * 100),
+      ratioB: clamp((B / total) * 100),
+      ratioC: clamp((C / total) * 100),
     };
+  }, [inventory]);
 
-    const getAccuracyColor = (rate: number) => {
-        if (rate >= 99) return 'text-emerald-500';
-        if (rate >= 95) return 'text-amber-500';
-        return 'text-red-500';
-    };
+  const abcBars = useMemo(
+    () => [
+      { label: 'Classe A', count: abc.A, ratio: abc.ratioA, color: 'bg-emerald-500' },
+      { label: 'Classe B', count: abc.B, ratio: abc.ratioB, color: 'bg-amber-500' },
+      { label: 'Classe C', count: abc.C, ratio: abc.ratioC, color: 'bg-slate-500' },
+    ],
+    [abc]
+  );
 
-    const handleOpenCount = async (batch: CyclicBatch) => {
-        const { data: counts } = await api.from('cyclic_counts').select('*').eq('batch_id', batch.id);
-        if (counts) {
-            setCurrentCounts(counts.map(c => ({
-                id: c.id,
-                batchId: c.batch_id,
-                sku: c.sku,
-                expectedQty: c.expected_qty,
-                countedQty: c.counted_qty,
-                status: c.status,
-                notes: c.notes,
-                countedAt: c.counted_at
-            })));
+  const avgAccuracy = useMemo(() => {
+    const done = batches.filter((batch) => batch.status === 'concluido' && Number.isFinite(batch.accuracyRate));
+    if (done.length === 0) return 100;
+    return done.reduce((acc, batch) => acc + Number(batch.accuracyRate || 0), 0) / done.length;
+  }, [batches]);
 
-            const initialInputs: Record<string, string> = {};
-            counts.forEach(c => {
-                initialInputs[c.id] = c.counted_qty?.toString() || '';
-            });
-            setCountInputs(initialInputs);
-            setSelectedBatch(batch);
-            setIsCountModalOpen(true);
+  const suggestedItems = useMemo(() => {
+    const ranked = inventory
+      .map((item) => {
+        const parsedLastCount = parseDateLike(item.lastCountedAt);
+        const daysWithoutCount = parsedLastCount
+          ? Math.floor((Date.now() - parsedLastCount.getTime()) / (24 * 60 * 60 * 1000))
+          : 999;
+        const abcWeight = item.abcCategory === 'A' ? 3 : item.abcCategory === 'B' ? 2 : 1;
+        const lowStock = item.quantity <= item.minQty ? 1 : 0;
+        return {
+          sku: item.sku,
+          expected: item.quantity,
+          score: abcWeight * 1000 + daysWithoutCount * 10 + lowStock * 100,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return ranked.slice(0, Math.min(10, ranked.length)).map(({ sku, expected }) => ({ sku, expected }));
+  }, [inventory]);
+
+  useEffect(() => {
+    if (activeTab !== 'accuracy') return;
+
+    let cancelled = false;
+    const run = async () => {
+      setIsLoadingDivergences(true);
+      try {
+        const scopedBatches = batches.slice(0, 40);
+        if (scopedBatches.length === 0) {
+          if (!cancelled) setDivergences([]);
+          return;
         }
-    };
 
-    const handleSaveBatch = async () => {
-        if (!selectedBatch) return;
+        const responses = await Promise.all(
+          scopedBatches.map((batch) =>
+            api
+              .from('cyclic_counts')
+              .select('*')
+              .eq('batch_id', batch.id)
+          )
+        );
 
-        const finalizedCounts = currentCounts.map(c => ({
-            ...c,
-            countedQty: parseInt(countInputs[c.id]) || 0,
-            status: 'contado'
-        }));
-
-        await onFinalizeBatch(selectedBatch.id, finalizedCounts);
-        setIsCountModalOpen(false);
-        setSelectedBatch(null);
-    };
-
-    const createSmartBatch = async (category: 'A' | 'B' | 'C', limit: number) => {
-        // Pegar itens da categoria que não foram contados recentemente
-        const items = inventory
-            .filter(i => i.abcCategory === category)
-            .sort((a, b) => {
-                if (!a.lastCountedAt) return -1;
-                if (!b.lastCountedAt) return 1;
-                return new Date(a.lastCountedAt).getTime() - new Date(b.lastCountedAt).getTime();
+        const result: DivergenceRow[] = [];
+        responses.forEach((response, batchIndex) => {
+          const batch = scopedBatches[batchIndex];
+          const rows = Array.isArray(response?.data)
+            ? response.data.filter((row: any) => {
+              const rowWarehouse = String(row?.warehouse_id || '').trim();
+              if (!rowWarehouse) return true;
+              return rowWarehouse === (batch.warehouseId || activeWarehouse);
             })
-            .slice(0, limit)
-            .map(i => ({ sku: i.sku, expected: i.quantity }));
+            : [];
 
-        if (items.length > 0) {
-            await onCreateBatch(items);
-            setIsNewBatchModalOpen(false);
-        }
+          rows.forEach((row: any, rowIndex: number) => {
+            const expectedQty = Number(row?.expected_qty || 0);
+            const countedQty = Number(row?.counted_qty);
+            if (!Number.isFinite(countedQty)) return;
+
+            const diff = countedQty - expectedQty;
+            if (diff === 0) return;
+
+            const abs = Math.abs(diff);
+            const severity: DivergenceRow['severity'] =
+              abs >= Math.max(5, Math.ceil(expectedQty * 0.2))
+                ? 'alta'
+                : abs >= Math.max(2, Math.ceil(expectedQty * 0.1))
+                  ? 'media'
+                  : 'baixa';
+
+            result.push({
+              id: `${batch.id}:${String(row?.sku || '')}:${String(row?.id || rowIndex)}`,
+              batchId: batch.id,
+              sku: String(row?.sku || ''),
+              expectedQty,
+              countedQty,
+              diff,
+              severity,
+              countedAt: row?.counted_at || batch.completedAt,
+            });
+          });
+        });
+
+        result.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+        if (!cancelled) setDivergences(result);
+      } finally {
+        if (!cancelled) setIsLoadingDivergences(false);
+      }
     };
 
-    return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                <div>
-                    <h2 className="text-3xl font-black tracking-tighter text-slate-800 dark:text-white flex items-center gap-3">
-                        Inventário Cíclico
-                        <span className="px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-lg uppercase tracking-widest">WMS Intelligence</span>
-                    </h2>
-                    <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mt-1">Gestão contínua de acuracidade</p>
-                </div>
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, batches, activeWarehouse]);
 
-                <div className="flex gap-4">
-                    <button
-                        onClick={onClassifyABC}
-                        className="bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-6 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M2 12h20" /></svg>
-                        Reclassificar ABC
-                    </button>
+  const handleClassifyABC = async () => {
+    setIsClassifying(true);
+    try {
+      await onClassifyABC();
+    } finally {
+      setIsClassifying(false);
+    }
+  };
 
-                    <button
-                        onClick={() => setIsNewBatchModalOpen(true)}
-                        className="bg-primary text-white px-8 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-3"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14m-7-7v14" /></svg>
-                        Novo Lote de Contagem
-                    </button>
-                </div>
-            </div>
+  const handleOpenBatch = async (batch: CyclicBatch) => {
+    const response = await api
+      .from('cyclic_counts')
+      .select('*')
+      .eq('batch_id', batch.id);
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm group hover:shadow-xl transition-all">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Classificação ABC</p>
-                    <div className="flex items-end gap-1 h-24 mb-4">
-                        <div className="flex-1 bg-emerald-500/20 rounded-t-2xl relative group/bar" style={{ height: '100%' }}>
-                            <div className="absolute inset-x-0 bottom-0 bg-emerald-500 rounded-t-2xl transition-all duration-1000" style={{ height: `${(abcStats.A / inventory.length) * 100}%` }}></div>
-                            <span className="absolute -top-6 inset-x-0 text-center text-[10px] font-black text-emerald-600">A: {abcStats.A}</span>
-                        </div>
-                        <div className="flex-1 bg-amber-500/20 rounded-t-2xl relative group/bar" style={{ height: '100%' }}>
-                            <div className="absolute inset-x-0 bottom-0 bg-amber-500 rounded-t-2xl transition-all duration-1000" style={{ height: `${(abcStats.B / inventory.length) * 100}%` }}></div>
-                            <span className="absolute -top-6 inset-x-0 text-center text-[10px] font-black text-amber-600">B: {abcStats.B}</span>
-                        </div>
-                        <div className="flex-1 bg-slate-500/20 rounded-t-2xl relative group/bar" style={{ height: '100%' }}>
-                            <div className="absolute inset-x-0 bottom-0 bg-slate-500 rounded-t-2xl transition-all duration-1000" style={{ height: `${(abcStats.C / inventory.length) * 100}%` }}></div>
-                            <span className="absolute -top-6 inset-x-0 text-center text-[10px] font-black text-slate-600">C: {abcStats.C}</span>
-                        </div>
-                    </div>
-                    <p className="text-xs text-slate-500 font-bold text-center leading-tight">Distribuição de valor e giro no CD</p>
-                </div>
+    if (response?.error) {
+      console.error('Falha ao carregar itens do lote:', response.error);
+      return;
+    }
 
-                <div className="p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col justify-between">
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Acuracidade Média</p>
-                        <h3 className={`text-5xl font-black tracking-tighter ${getAccuracyColor(batches.length ? batches.reduce((acc, b) => acc + (b.accuracyRate || 0), 0) / batches.length : 100)}`}>
-                            {batches.length ? (batches.reduce((acc, b) => acc + (b.accuracyRate || 0), 0) / batches.length).toFixed(1) : '100'}%
-                        </h3>
-                    </div>
-                    <div className="mt-4 flex items-center gap-2">
-                        <div className="flex-1 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500" style={{ width: '99.2%' }}></div>
-                        </div>
-                        <span className="text-[10px] font-black text-slate-400">META: 99.5%</span>
-                    </div>
-                </div>
+    const rows = Array.isArray(response?.data)
+      ? response.data.filter((row: any) => {
+        const rowWarehouse = String(row?.warehouse_id || '').trim();
+        if (!rowWarehouse) return true;
+        return rowWarehouse === (batch.warehouseId || activeWarehouse);
+      })
+      : [];
+    const usedKeys = new Set<string>();
 
-                <div className="p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 p-8 text-white/5 group-hover:text-white/10 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" /><path d="m9 12 2 2 4-4" /></svg>
-                    </div>
-                    <div className="relative z-10">
-                        <p className="text-[10px] font-black text-white/50 uppercase tracking-widest mb-1">Status Global</p>
-                        <h3 className="text-2xl font-black tracking-tight leading-tight mb-4">Operação em Conformidade</h3>
-                        <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-[10px] font-bold">
-                                <span className="size-2 rounded-full bg-emerald-500"></span>
-                                Itens Críticos Contados
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] font-bold">
-                                <span className="size-2 rounded-full bg-emerald-500"></span>
-                                Giro Classe A Monitorado
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    const mapped: CountRow[] = rows
+      .map((row: any, index: number) => {
+        const sourceId = row?.id ? String(row.id) : undefined;
+        const baseKey = sourceId || `${batch.id}:${String(row?.sku || '')}:${index}`;
+        let inputKey = baseKey;
+        let duplicateCursor = 1;
 
-            <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-                <div className="p-8 border-b border-slate-50 dark:border-slate-800 flex items-center justify-between">
-                    <div className="flex gap-8">
-                        <button
-                            onClick={() => setActiveTab('batches')}
-                            className={`text-[11px] font-black uppercase tracking-widest pb-2 border-b-4 transition-all ${activeTab === 'batches' ? 'border-primary text-slate-800 dark:text-white' : 'border-transparent text-slate-400'}`}
-                        >
-                            Lotes Recentes
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('accuracy')}
-                            className={`text-[11px] font-black uppercase tracking-widest pb-2 border-b-4 transition-all ${activeTab === 'accuracy' ? 'border-primary text-slate-800 dark:text-white' : 'border-transparent text-slate-400'}`}
-                        >
-                            Mapa de Divergências
-                        </button>
-                    </div>
-                </div>
+        while (usedKeys.has(inputKey)) {
+          inputKey = `${baseKey}:${duplicateCursor}`;
+          duplicateCursor += 1;
+        }
+        usedKeys.add(inputKey);
 
-                <div className="p-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {batches.map(batch => (
-                            <div key={batch.id} className="p-6 rounded-3xl border border-slate-100 dark:border-slate-800 hover:border-primary/30 transition-all group">
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">#{batch.id}</span>
-                                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${batch.status === 'aberto' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'
-                                        }`}>
-                                        {batch.status}
-                                    </span>
-                                </div>
+        const expectedQty = Number(row?.expected_qty || 0);
+        const parsedCount = Number(row?.counted_qty);
+        return {
+          id: inputKey,
+          inputKey,
+          sourceId,
+          batchId: String(row?.batch_id || batch.id),
+          sku: String(row?.sku || ''),
+          expectedQty,
+          countedQty: Number.isFinite(parsedCount) ? parsedCount : undefined,
+          status: (row?.status || 'pendente') as CyclicCount['status'],
+          notes: row?.notes || undefined,
+          countedAt: row?.counted_at || undefined,
+        };
+      })
+      .sort((a, b) => a.sku.localeCompare(b.sku));
 
-                                <div className="space-y-4">
-                                    <div>
-                                        <p className="text-xs font-bold text-slate-500 mb-1">Data Agendada</p>
-                                        <p className="text-sm font-black text-slate-800 dark:text-white">
-                                            {new Date(batch.scheduledDate).toLocaleDateString('pt-BR')}
-                                        </p>
-                                    </div>
+    const inputs = mapped.reduce<Record<string, string>>((acc, row) => {
+      acc[row.inputKey] = String(Number.isFinite(row.countedQty as number) ? row.countedQty : row.expectedQty);
+      return acc;
+    }, {});
 
-                                    <div className="flex justify-between items-end">
-                                        <div>
-                                            <p className="text-xs font-bold text-slate-500 mb-1">Itens</p>
-                                            <p className="text-lg font-black text-slate-800 dark:text-white">{batch.totalItems}</p>
-                                        </div>
-                                        {batch.status === 'concluido' && (
-                                            <div className="text-right">
-                                                <p className="text-xs font-bold text-slate-500 mb-1">Acuracidade</p>
-                                                <p className={`text-lg font-black ${getAccuracyColor(batch.accuracyRate || 0)}`}>{batch.accuracyRate?.toFixed(1)}%</p>
-                                            </div>
-                                        )}
-                                    </div>
+    setCounts(mapped);
+    setCountInputs(inputs);
+    setSelectedBatch(batch);
+    setIsCountModalOpen(true);
+  };
 
-                                    {batch.status === 'aberto' ? (
-                                        <button
-                                            onClick={() => handleOpenCount(batch)}
-                                            className="w-full py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all shadow-lg active:scale-95"
-                                        >
-                                            Iniciar Contagem
-                                        </button>
-                                    ) : (
-                                        <button className="w-full py-3 bg-slate-50 dark:bg-slate-800 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                                            Concluído
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
+  const handleFinalizeBatch = async () => {
+    if (!selectedBatch) return;
 
-                        {batches.length === 0 && (
-                            <div className="col-span-full py-20 text-center space-y-4">
-                                <div className="size-20 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400"><path d="M12 2v10" /><path d="M18.4 4.6a10 10 0 1 1-12.8 0" /></svg>
-                                </div>
-                                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Nenhum lote de inventário criado</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+    const finalCounts = counts.map((row) => {
+      const parsed = Number.parseInt(String(countInputs[row.inputKey] || '').trim(), 10);
+      const countedQty = Number.isFinite(parsed) && parsed >= 0 ? parsed : row.expectedQty;
+      return {
+        ...row,
+        countedQty,
+        status: countedQty === row.expectedQty ? 'contado' : 'ajustado',
+      };
+    });
 
-            {/* Modal Nova Contagem */}
-            {isNewBatchModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsNewBatchModalOpen(false)}></div>
-                    <div className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-10 text-center">
-                            <div className="size-16 bg-primary/10 text-primary rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" /><path d="M8 12h8" /><path d="M12 8v8" /></svg>
-                            </div>
-                            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight mb-2">Novo Lote Inteligente</h3>
-                            <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-10">Escolha a estratégia de contagem</p>
+    await onFinalizeBatch(selectedBatch.id, finalCounts);
+    setIsCountModalOpen(false);
+    setSelectedBatch(null);
+    setCounts([]);
+    setCountInputs({});
+  };
 
-                            <div className="space-y-4">
-                                <button
-                                    onClick={() => createSmartBatch('A', 5)}
-                                    className="w-full p-6 text-left border-2 border-slate-100 dark:border-slate-800 rounded-[2rem] hover:border-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 transition-all group"
-                                >
-                                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Estratégia de Alto Valor</p>
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-lg font-black text-slate-800 dark:text-white group-hover:text-emerald-700 transition-colors">Giro Classe A (5 Itens)</h4>
-                                        <span className="material-symbols-outlined text-emerald-500">arrow_forward</span>
-                                    </div>
-                                </button>
+  const createSmartBatch = async (category: 'A' | 'B' | 'C', limit: number) => {
+    const selected = inventory
+      .filter((item) => item.abcCategory === category)
+      .sort((a, b) => {
+        const dateA = parseDateLike(a.lastCountedAt)?.getTime() ?? Number.NaN;
+        const dateB = parseDateLike(b.lastCountedAt)?.getTime() ?? Number.NaN;
+        if (!Number.isFinite(dateA) && !Number.isFinite(dateB)) return 0;
+        if (!Number.isFinite(dateA)) return -1;
+        if (!Number.isFinite(dateB)) return 1;
+        return dateA - dateB;
+      })
+      .slice(0, limit)
+      .map((item) => ({ sku: item.sku, expected: item.quantity }));
 
-                                <button
-                                    onClick={() => createSmartBatch('B', 10)}
-                                    className="w-full p-6 text-left border-2 border-slate-100 dark:border-slate-800 rounded-[2rem] hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-all group"
-                                >
-                                    <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-1">Estratégia de Volume</p>
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-lg font-black text-slate-800 dark:text-white group-hover:text-amber-700 transition-colors">Médio Giro Classe B (10 Itens)</h4>
-                                        <span className="material-symbols-outlined text-amber-500">arrow_forward</span>
-                                    </div>
-                                </button>
+    if (selected.length === 0) return;
+    await onCreateBatch(selected);
+    setIsNewBatchModalOpen(false);
+  };
 
-                                <button
-                                    onClick={() => createSmartBatch('C', 15)}
-                                    className="w-full p-6 text-left border-2 border-slate-100 dark:border-slate-800 rounded-[2rem] hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900/10 transition-all group"
-                                >
-                                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Estratégia de Cobertura</p>
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-lg font-black text-slate-800 dark:text-white group-hover:text-slate-700 transition-colors">Giro Lento Classe C (15 Itens)</h4>
-                                        <span className="material-symbols-outlined text-slate-500">arrow_forward</span>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="p-8 bg-slate-50 dark:bg-slate-800/30 flex gap-4">
-                            <button onClick={() => setIsNewBatchModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal Executar Contagem */}
-            {isCountModalOpen && selectedBatch && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsCountModalOpen(false)}></div>
-                    <div className="relative bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col h-[80vh]">
-                        <div className="p-10 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/30">
-                            <div>
-                                <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Executando Lote #{selectedBatch.id}</h3>
-                                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Conferência física de estoque</p>
-                            </div>
-                            <button
-                                onClick={() => setIsCountModalOpen(false)}
-                                className="size-12 rounded-2xl bg-white dark:bg-slate-900 shadow-lg flex items-center justify-center hover:scale-110 active:scale-90 transition-all group"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 group-hover:text-red-500"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-10 space-y-6">
-                            {currentCounts.map(count => {
-                                const item = inventory.find(i => i.sku === count.sku);
-                                const diff = (parseInt(countInputs[count.id]) || 0) - count.expectedQty;
-
-                                return (
-                                    <div key={count.id} className="p-6 bg-slate-50 dark:bg-slate-800/20 rounded-[2rem] border border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center gap-8">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">{count.sku} • {item?.location || 'S/ LOC'}</p>
-                                            <h4 className="text-lg font-black text-slate-800 dark:text-white truncate">{item?.name || 'Produto não encontrado'}</h4>
-                                        </div>
-
-                                        <div className="flex items-center gap-10">
-                                            <div className="text-center">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Esperado</p>
-                                                <p className="text-xl font-black text-slate-800 dark:text-white">{count.expectedQty}</p>
-                                            </div>
-
-                                            <div className="w-32">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 text-center">Contagem</p>
-                                                <input
-                                                    type="number"
-                                                    value={countInputs[count.id]}
-                                                    onChange={(e) => setCountInputs(prev => ({ ...prev, [count.id]: e.target.value }))}
-                                                    className="w-full bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-center font-black text-lg focus:border-primary transition-all"
-                                                    placeholder="0"
-                                                />
-                                            </div>
-
-                                            <div className="w-20 text-center">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Diverg.</p>
-                                                <p className={`text-lg font-black ${diff === 0 ? 'text-slate-300' : diff > 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                    {diff > 0 ? '+' : ''}{diff}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        <div className="p-10 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex gap-6">
-                            <button
-                                onClick={() => setIsCountModalOpen(false)}
-                                className="flex-1 py-5 bg-slate-50 dark:bg-slate-800 text-slate-400 rounded-[2rem] text-[11px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all font-inter"
-                            >
-                                Salvar Rascunho
-                            </button>
-                            <button
-                                onClick={handleSaveBatch}
-                                className="flex-[2] py-5 bg-primary text-white rounded-[2rem] text-[11px] font-black uppercase tracking-widest shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all"
-                            >
-                                Finalizar e Ajustar Estoque
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-black tracking-tight text-slate-800 dark:text-white">Inventário Cíclico</h2>
+          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Gestão contínua de acuracidade</p>
         </div>
-    );
+        <div className="flex gap-3">
+          <button
+            onClick={() => void handleClassifyABC()}
+            disabled={isClassifying}
+            className="px-6 py-3 rounded-2xl border border-slate-200 text-xs font-black uppercase tracking-widest hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isClassifying ? 'Reclassificando...' : 'Reclassificar ABC'}
+          </button>
+          <button
+            onClick={() => setIsNewBatchModalOpen(true)}
+            className="px-6 py-3 rounded-2xl bg-primary text-white text-xs font-black uppercase tracking-widest"
+          >
+            Novo Lote de Contagem
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5 rounded-2xl border border-primary/20 bg-primary/5 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-primary">Sugestão automática</p>
+          <p className="text-sm font-black text-slate-700">
+            Lote sugerido com {suggestedItems.length} itens priorizados por classe ABC e tempo sem contagem.
+          </p>
+        </div>
+        <button
+          onClick={() => void onCreateBatch(suggestedItems)}
+          disabled={suggestedItems.length === 0}
+          className="px-4 py-2 rounded-xl bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+        >
+          Criar Lote Sugerido
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="p-6 bg-white rounded-2xl border">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">
+            Classificação ABC por criticidade
+          </p>
+          <div className="grid grid-cols-3 gap-3 h-28 items-end">
+            {abcBars.map((entry) => (
+              <div key={entry.label} className="h-full rounded-2xl border border-slate-200/70 bg-slate-50 p-1 flex items-end">
+                <div
+                  className={`${entry.color} w-full rounded-xl transition-all duration-300`}
+                  style={{ height: `${Math.max(12, Math.round(entry.ratio))}%` }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+            {abcBars.map((entry) => (
+              <div key={`${entry.label}-info`}>
+                <p className="text-[10px] font-black text-slate-700">{entry.label}</p>
+                <p className="text-[10px] font-bold text-slate-400">
+                  {entry.count} itens ({Math.round(entry.ratio)}%)
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-6 bg-white rounded-2xl border">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Acuracidade média</p>
+          <h3 className={`text-5xl font-black ${accuracyClass(avgAccuracy)}`}>{avgAccuracy.toFixed(1)}%</h3>
+        </div>
+
+        <div className="p-6 bg-slate-900 text-white rounded-2xl">
+          <p className="text-[10px] font-black uppercase tracking-widest text-white/60 mb-1">Status global</p>
+          <p className="text-xl font-black">Lotes abertos: {batches.filter((batch) => batch.status === 'aberto').length}</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border overflow-hidden">
+        <div className="p-4 border-b flex gap-6">
+          <button
+            onClick={() => setActiveTab('batches')}
+            className={`text-xs font-black uppercase tracking-widest ${activeTab === 'batches' ? 'text-primary' : 'text-slate-400'}`}
+          >
+            Lotes Recentes
+          </button>
+          <button
+            onClick={() => setActiveTab('accuracy')}
+            className={`text-xs font-black uppercase tracking-widest ${activeTab === 'accuracy' ? 'text-primary' : 'text-slate-400'}`}
+          >
+            Mapa de Divergências
+          </button>
+        </div>
+
+        {activeTab === 'batches' && (
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {batches.map((batch) => (
+              <div key={batch.id} className="p-4 rounded-2xl border">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-black uppercase">#{batch.id}</span>
+                  <span
+                    className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${batch.status === 'aberto' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'}`}
+                  >
+                    {batch.status}
+                  </span>
+                </div>
+                <p className="text-xs font-bold text-slate-500">Data: {formatDate(batch.scheduledDate)}</p>
+                <p className="text-xs font-bold text-slate-500">Itens: {batch.totalItems}</p>
+                {batch.status === 'aberto' ? (
+                  <button
+                    onClick={() => void handleOpenBatch(batch)}
+                    className="mt-3 w-full py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Iniciar Contagem
+                  </button>
+                ) : (
+                  <div className="mt-3 text-[10px] font-black text-slate-400 uppercase">Concluído</div>
+                )}
+              </div>
+            ))}
+            {batches.length === 0 && (
+              <div className="col-span-full p-10 text-center text-xs font-black uppercase text-slate-400">
+                Nenhum lote criado
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'accuracy' && (
+          <div className="p-4">
+            {isLoadingDivergences && (
+              <p className="text-xs font-black uppercase text-slate-400">Carregando divergências...</p>
+            )}
+            {!isLoadingDivergences && divergences.length === 0 && (
+              <p className="text-xs font-black uppercase text-slate-400">Sem divergências registradas.</p>
+            )}
+            {!isLoadingDivergences && divergences.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
+                      <th className="px-3 py-2">Lote</th>
+                      <th className="px-3 py-2">SKU</th>
+                      <th className="px-3 py-2 text-right">Esperado</th>
+                      <th className="px-3 py-2 text-right">Contado</th>
+                      <th className="px-3 py-2 text-right">Diverg.</th>
+                      <th className="px-3 py-2">Severidade</th>
+                      <th className="px-3 py-2">Data</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {divergences.map((row) => (
+                      <tr key={row.id} className="border-b">
+                        <td className="px-3 py-2 text-xs font-black">#{row.batchId}</td>
+                        <td className="px-3 py-2 text-xs font-black">{row.sku}</td>
+                        <td className="px-3 py-2 text-right font-black">{row.expectedQty}</td>
+                        <td className="px-3 py-2 text-right font-black">{row.countedQty}</td>
+                        <td className={`px-3 py-2 text-right font-black ${row.diff > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {row.diff > 0 ? '+' : ''}
+                          {row.diff}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${SEVERITY_CLASS[row.severity]}`}>
+                            {row.severity}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-xs font-bold">{formatDateTime(row.countedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isNewBatchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setIsNewBatchModalOpen(false)} />
+          <div className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl p-8 space-y-4">
+            <h3 className="text-2xl font-black">Novo Lote Inteligente</h3>
+            {[
+              { label: 'Giro Classe A (5 itens)', category: 'A' as const, limit: 5 },
+              { label: 'Médio Giro Classe B (10 itens)', category: 'B' as const, limit: 10 },
+              { label: 'Giro Lento Classe C (15 itens)', category: 'C' as const, limit: 15 },
+            ].map((entry) => (
+              <button
+                key={entry.label}
+                onClick={() => void createSmartBatch(entry.category, entry.limit)}
+                className="w-full p-4 border rounded-2xl text-left font-black flex items-center justify-between hover:bg-slate-50"
+              >
+                <span>{entry.label}</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="size-5 text-slate-500"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 12h14" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
+              </button>
+            ))}
+            <button onClick={() => setIsNewBatchModalOpen(false)} className="w-full py-3 text-[10px] font-black uppercase text-slate-400">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isCountModalOpen && selectedBatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setIsCountModalOpen(false)} />
+          <div className="relative bg-white w-full max-w-4xl h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-6 border-b">
+              <h3 className="text-2xl font-black">Executando Lote #{selectedBatch.id}</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {counts.map((row) => {
+                const parsed = Number.parseInt(String(countInputs[row.inputKey] || '').trim(), 10);
+                const counted = Number.isFinite(parsed) ? parsed : row.expectedQty;
+                const diff = counted - row.expectedQty;
+                const item = inventory.find((entry) => entry.sku === row.sku);
+                return (
+                  <div key={row.inputKey} className="p-4 rounded-2xl border bg-slate-50 flex items-center gap-4">
+                    <div className="flex-1">
+                      <p className="text-xs font-black text-primary">
+                        {row.sku} | {item?.location || 'S/ LOC'}
+                      </p>
+                      <p className="text-sm font-black">{item?.name || 'Produto não encontrado'}</p>
+                    </div>
+                    <div className="text-center min-w-20">
+                      <p className="text-[10px] font-black uppercase text-slate-400">Esperado</p>
+                      <p className="font-black">{row.expectedQty}</p>
+                    </div>
+                    <div className="min-w-24">
+                      <p className="text-[10px] font-black uppercase text-slate-400 text-center">Contagem</p>
+                      <input
+                        type="number"
+                        min={0}
+                        value={countInputs[row.inputKey] ?? ''}
+                        onChange={(event) =>
+                          setCountInputs((prev) => ({
+                            ...prev,
+                            [row.inputKey]: event.target.value,
+                          }))
+                        }
+                        className="w-full border-2 rounded-xl px-3 py-2 text-center font-black"
+                      />
+                    </div>
+                    <div className="text-center min-w-16">
+                      <p className="text-[10px] font-black uppercase text-slate-400">Diverg.</p>
+                      <p className={`font-black ${diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                        {diff > 0 ? '+' : ''}
+                        {diff}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+              {counts.length === 0 && (
+                <div className="p-8 rounded-2xl border border-dashed text-center text-xs font-black uppercase text-slate-400">
+                  Sem itens para contagem neste lote.
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t flex gap-4">
+              <button onClick={() => setIsCountModalOpen(false)} className="flex-1 py-3 rounded-2xl bg-slate-100 text-[10px] font-black uppercase">
+                Salvar Rascunho
+              </button>
+              <button onClick={() => void handleFinalizeBatch()} className="flex-[2] py-3 rounded-2xl bg-primary text-white text-[10px] font-black uppercase">
+                Finalizar e Ajustar Estoque
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };

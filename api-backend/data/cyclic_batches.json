@@ -1,0 +1,54 @@
+[
+  {
+    "id": "INV-1770524383787",
+    "status": "concluido",
+    "total_items": 5,
+    "warehouse_id": "ARMZ28",
+    "completed_at": "2026-02-08T11:16:09.123Z",
+    "accuracy_rate": 40,
+    "divergent_items": 3
+  },
+  {
+    "id": "INV-1770524410722",
+    "status": "concluido",
+    "total_items": 15,
+    "warehouse_id": "ARMZ28",
+    "completed_at": "2026-02-08T09:28:52.046Z",
+    "accuracy_rate": 0,
+    "divergent_items": 15
+  },
+  {
+    "id": "INV-1770543529351",
+    "status": "aberto",
+    "total_items": 5,
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "INV-1770549289316",
+    "status": "concluido",
+    "scheduled_date": "2026-02-08T11:14:49.316Z",
+    "total_items": 10,
+    "divergent_items": 10,
+    "warehouse_id": "ARMZ28",
+    "completed_at": "2026-02-08T11:25:48.115Z",
+    "accuracy_rate": 0
+  },
+  {
+    "id": "INV-1770549293979",
+    "status": "concluido",
+    "scheduled_date": "2026-02-08T11:14:53.979Z",
+    "total_items": 10,
+    "divergent_items": 10,
+    "warehouse_id": "ARMZ28",
+    "completed_at": "2026-02-08T17:41:24.562Z",
+    "accuracy_rate": 0
+  },
+  {
+    "id": "INV-1770569389199",
+    "status": "aberto",
+    "scheduled_date": "2026-02-08T16:49:49.199Z",
+    "total_items": 10,
+    "divergent_items": 0,
+    "warehouse_id": "ARMZ28"
+  }
+]

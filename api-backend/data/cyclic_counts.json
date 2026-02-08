@@ -1,0 +1,457 @@
+[
+  {
+    "batch_id": "INV-1770524383787",
+    "sku": "SKU-000024",
+    "expected_qty": 186,
+    "status": "ajustado",
+    "counted_qty": 190,
+    "counted_at": "2026-02-08T11:16:09.123Z",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "batch_id": "INV-1770524383787",
+    "sku": "SKU-000012",
+    "expected_qty": 34,
+    "status": "ajustado",
+    "counted_qty": 38,
+    "counted_at": "2026-02-08T11:16:09.123Z",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "batch_id": "INV-1770524383787",
+    "sku": "SKU-000022",
+    "expected_qty": 54,
+    "status": "ajustado",
+    "counted_qty": 50,
+    "counted_at": "2026-02-08T11:16:09.123Z",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "batch_id": "INV-1770524383787",
+    "sku": "SKU-000036",
+    "expected_qty": 52,
+    "status": "contado",
+    "counted_qty": 52,
+    "counted_at": "2026-02-08T11:16:09.123Z",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "batch_id": "INV-1770524383787",
+    "sku": "SKU-000015",
+    "expected_qty": 40,
+    "status": "contado",
+    "counted_qty": 40,
+    "counted_at": "2026-02-08T11:16:09.123Z",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-REC-1770523099557",
+    "expected_qty": 15,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000001",
+    "expected_qty": 12,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000037",
+    "expected_qty": 54,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000014",
+    "expected_qty": 38,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000026",
+    "expected_qty": 86,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000012",
+    "expected_qty": 34,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000008",
+    "expected_qty": 26,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000022",
+    "expected_qty": 54,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000025",
+    "expected_qty": 60,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000036",
+    "expected_qty": 52,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000044",
+    "expected_qty": 68,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000046",
+    "expected_qty": 72,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000006",
+    "expected_qty": 22,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000048",
+    "expected_qty": 76,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770524410722",
+    "sku": "SKU-000032",
+    "expected_qty": 44,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770543529351",
+    "sku": "SKU-000031",
+    "expected_qty": 42,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770543529351",
+    "sku": "SKU-000024",
+    "expected_qty": 186,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770543529351",
+    "sku": "SKU-000011",
+    "expected_qty": 21,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770543529351",
+    "sku": "SKU-000035",
+    "expected_qty": 50,
+    "status": "pendente"
+  },
+  {
+    "batch_id": "INV-1770543529351",
+    "sku": "SKU-000043",
+    "expected_qty": 66,
+    "status": "pendente"
+  },
+  {
+    "id": "e3783095-762a-4830-a1fb-41aada135d08",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000011",
+    "expected_qty": 21,
+    "counted_qty": 1,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "7bc26eaa-96c4-4825-9b4d-4ef03dcb9b09",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000028",
+    "expected_qty": 66,
+    "counted_qty": 1,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "30e8f16b-224e-45a7-b42e-019598d54c66",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000020",
+    "expected_qty": 50,
+    "counted_qty": 2,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "c44b8c93-2e23-4ab0-88b4-3053b484b9bc",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000007",
+    "expected_qty": 24,
+    "counted_qty": 2,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "58382ba2-bdce-4209-82c6-867846555612",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000004",
+    "expected_qty": 18,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "b992a4aa-6195-4978-a248-b1aa07c2d2b3",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000015",
+    "expected_qty": 40,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "91210eb6-51e5-4cb4-ad47-577ee385cc9c",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000005",
+    "expected_qty": 20,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "9949e92c-74a5-4432-b56d-9ec4c8294061",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000043",
+    "expected_qty": 66,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "2cf3cd86-804d-4c6b-93d6-ea77f9f15d49",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000035",
+    "expected_qty": 50,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "26ad6f84-eac8-4eb9-afca-f8ab6869312c",
+    "batch_id": "INV-1770549289316",
+    "sku": "SKU-000024",
+    "expected_qty": 186,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T11:25:48.115Z"
+  },
+  {
+    "id": "d4413617-e037-4e83-9863-cb7e276c36e7",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000011",
+    "expected_qty": 21,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "7d21d05d-22d1-446e-ba99-c9e2de22fde2",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000028",
+    "expected_qty": 66,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "2e7432aa-356c-46aa-972f-3fa0fced2825",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000020",
+    "expected_qty": 50,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "b34f61ff-7621-43dc-90ed-19f798979562",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000007",
+    "expected_qty": 24,
+    "counted_qty": 3,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "d2fd4295-a29d-49bc-9ddb-2b055f7d814f",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000004",
+    "expected_qty": 18,
+    "counted_qty": 3,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "6656684b-13c6-4292-8cbf-4833c25f43f7",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000015",
+    "expected_qty": 40,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "6015bc1c-4d1d-4b13-ac87-f78f6bbed189",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000005",
+    "expected_qty": 20,
+    "counted_qty": 4,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "7ebcaf99-2820-4f4d-bfb3-b443ece83699",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000043",
+    "expected_qty": 66,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "fb02bd9e-8dd2-4d82-b6a5-3a63c9b2cd47",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000035",
+    "expected_qty": 50,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "eb388529-61d6-4c05-8ca1-5e0f6e8d10d5",
+    "batch_id": "INV-1770549293979",
+    "sku": "SKU-000024",
+    "expected_qty": 186,
+    "counted_qty": 0,
+    "status": "ajustado",
+    "warehouse_id": "ARMZ28",
+    "counted_at": "2026-02-08T17:41:24.562Z"
+  },
+  {
+    "id": "7d46ee51-6816-48d3-9668-163e3e9b7acc",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000031",
+    "expected_qty": 42,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "4b7f03b3-d4f7-4118-8f3b-48023d41a361",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000050",
+    "expected_qty": 30,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "f0e0766f-ed73-4507-8a0e-71738898e610",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000034",
+    "expected_qty": 66,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "20640cca-bdb0-4abe-90b2-6d92b6cb91c8",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000047",
+    "expected_qty": 74,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "acf48dad-db9c-42ab-a924-56966a2aa9d0",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000040",
+    "expected_qty": 60,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "009766ba-b8a7-47f3-b5c9-8ffd08e4df71",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000027",
+    "expected_qty": 79,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "df0b808c-a8ee-47f4-b18e-5aaa67bb9dc2",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000002",
+    "expected_qty": 14,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "8cbeda23-20a4-4c63-8291-6a67627d58c2",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000038",
+    "expected_qty": 56,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "21aae2a8-defa-4066-a72b-0036ec4f8e25",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000017",
+    "expected_qty": 44,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  },
+  {
+    "id": "5e72d47c-fba4-4f65-ad20-daadc654ddc0",
+    "batch_id": "INV-1770569389199",
+    "sku": "SKU-000010",
+    "expected_qty": 30,
+    "counted_qty": null,
+    "status": "pendente",
+    "warehouse_id": "ARMZ28"
+  }
+]

@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: logiwms
+      POSTGRES_DB: armazem
     ports:
       - "5432:5432"
     volumes:
@@ -21,14 +21,14 @@ services:
     container_name: logiwms-backend
     restart: always
     environment:
-      - PORT=3000
+      - PORT=3001
       - DB_HOST=db
       - DB_USER=postgres
       - DB_PASSWORD=postgrespassword
-      - DB_NAME=logiwms
+      - DB_NAME=armazem
       - DB_PORT=5432
     ports:
-      - "3001:3000"
+      - "3001:3001"
     depends_on:
       - db
     networks:

@@ -29,6 +29,16 @@ const seedInput = Number(argMap.get('seed') || 20260207);
 const keepBackup = argMap.get('backup') !== 'false';
 
 const scaleConfig = {
+  demo50: {
+    inventory: 50,
+    movements: 50,
+    purchaseOrders: 50,
+    materialRequests: 50,
+    notifications: 50,
+    vendors: 50,
+    vehicles: 50,
+    extraUsers: 50,
+  },
   medium: {
     inventory: 25000,
     movements: 90000,
@@ -62,7 +72,7 @@ const scaleConfig = {
 };
 
 if (!scaleConfig[scale]) {
-  console.error(`Escala invalida: ${scale}. Use medium | large | xlarge.`);
+  console.error(`Escala invalida: ${scale}. Use demo50 | medium | large | xlarge.`);
   process.exit(1);
 }
 
@@ -181,6 +191,9 @@ if (preservedUsers.length === 0) {
 
 const warehouses = readJson('warehouses.json', []);
 const whIds = warehouses.length > 0 ? warehouses.map((w) => w.id) : ['ARMZ28', 'ARMZ33'];
+const demoWarehouseId = scale === 'demo50'
+  ? (whIds.includes('ARMZ28') ? 'ARMZ28' : whIds[0])
+  : null;
 
 const vendors = [];
 for (let i = 1; i <= cfg.vendors; i += 1) {
@@ -218,7 +231,7 @@ for (let i = 1; i <= cfg.inventory; i += 1) {
   const status = quantity < minQty ? 'Estoque Critico' : pick(statuses);
   const category = pick(categories);
   const abc = rnd() > 0.7 ? (rnd() > 0.5 ? 'B' : 'C') : 'A';
-  const wh = pick(whIds);
+  const wh = demoWarehouseId || pick(whIds);
   const sku = makeSku(i);
 
   inventory.push({
@@ -265,7 +278,7 @@ for (let i = 1; i <= cfg.purchaseOrders; i += 1) {
   }
 
   const status = pick(poStatuses);
-  const wh = pick(whIds);
+  const wh = demoWarehouseId || pick(whIds);
 
   purchaseOrders.push({
     id: `PO-2026-${String(i).padStart(6, '0')}`,
@@ -296,7 +309,7 @@ for (let i = 1; i <= cfg.movements; i += 1) {
   const sku = pick(skuIdx);
   const invItem = skuMap.get(sku);
   const type = pick(movementTypes);
-  const wh = invItem?.warehouse_id || pick(whIds);
+  const wh = invItem?.warehouse_id || demoWarehouseId || pick(whIds);
 
   movements.push({
     id: `MOV-${String(i).padStart(9, '0')}`,
@@ -318,7 +331,7 @@ for (let i = 1; i <= cfg.materialRequests; i += 1) {
   const sku = pick(skuIdx);
   const invItem = skuMap.get(sku);
   const vehicle = vehicles.length > 0 ? pick(vehicles) : null;
-  const wh = invItem?.warehouse_id || pick(whIds);
+  const wh = invItem?.warehouse_id || demoWarehouseId || pick(whIds);
 
   materialRequests.push({
     id: `REQ-${String(i).padStart(8, '0')}`,

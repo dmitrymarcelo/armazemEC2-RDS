@@ -38,10 +38,10 @@ interface Order {
 interface ExpeditionProps {
   inventory: InventoryItem[];
   vehicles?: Vehicle[];
-  onProcessPicking: (sku: string, qty: number) => boolean;
+  onProcessPicking: (sku: string, qty: number, reason?: string, orderId?: string) => Promise<boolean>;
   requests: MaterialRequest[];
-  onRequestCreate: (data: MaterialRequest) => void;
-  onRequestUpdate: (id: string, status: RequestStatus) => void;
+  onRequestCreate: (data: MaterialRequest) => Promise<void>;
+  onRequestUpdate: (id: string, status: RequestStatus) => Promise<void>;
   activeWarehouse: string;
   currentPage: number;
   pageSize: number;
@@ -107,22 +107,30 @@ export const Expedition: React.FC<ExpeditionProps> = ({
   const selectedItemStock = reqSku ? getStockForSku(reqSku) : 0;
   const isInvalidRequest = Number(reqQty) > selectedItemStock || Number(reqQty) <= 0;
 
-  const handleStartPicking = (orderId: string) => {
+  const handleStartPicking = async (orderId: string) => {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
     let allOk = true;
-    order.items.forEach(item => {
-      const success = onProcessPicking(item.sku, item.qty);
-      if (!success) allOk = false;
-    });
+    for (const item of order.items) {
+      const success = await onProcessPicking(
+        item.sku,
+        item.qty,
+        `Saída para Expedição / Ordem ${orderId}`,
+        orderId
+      );
+      if (!success) {
+        allOk = false;
+        break;
+      }
+    }
 
     if (allOk) {
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'enviado' } : o));
     }
   };
 
-  const handleSubmitRequest = (e: React.FormEvent) => {
+  const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isInvalidRequest) return;
 
@@ -140,7 +148,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
       warehouseId: activeWarehouse
     };
 
-    onRequestCreate(newRequest);
+    await onRequestCreate(newRequest);
     setIsRequestModalOpen(false);
     resetForm();
   };
@@ -154,17 +162,22 @@ export const Expedition: React.FC<ExpeditionProps> = ({
     setReqPriority('normal');
   };
 
-  const advanceWorkflow = (requestId: string) => {
+  const advanceWorkflow = async (requestId: string) => {
     const request = requests.find(r => r.id === requestId);
     if (!request) return;
 
     if (request.status === 'aprovacao') {
-      onRequestUpdate(requestId, 'separacao');
+      await onRequestUpdate(requestId, 'separacao');
     } else if (request.status === 'separacao') {
       // O momento da entrega é o gatilho para a baixa no estoque
-      const success = onProcessPicking(request.sku, request.qty);
+      const success = await onProcessPicking(
+        request.sku,
+        request.qty,
+        `Saída por Solicitação SA ${request.id}`,
+        request.id
+      );
       if (success) {
-        onRequestUpdate(requestId, 'entregue');
+        await onRequestUpdate(requestId, 'entregue');
       }
     }
   };
@@ -250,7 +263,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
                   <div className="flex justify-between mt-6">
                     {req.status !== 'entregue' ? (
                       <button
-                        onClick={() => advanceWorkflow(req.id)}
+                        onClick={() => { void advanceWorkflow(req.id); }}
                         className={`w-full py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${req.status === 'aprovacao' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
                           }`}
                       >
@@ -341,7 +354,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
                 <div className="flex items-center gap-3">
                   {order.status === 'pendente' ? (
                     <button
-                      onClick={() => handleStartPicking(order.id)}
+                      onClick={() => { void handleStartPicking(order.id); }}
                       className="px-6 py-3 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:bg-blue-600 transition-all flex items-center gap-2 active:scale-95"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -475,7 +488,6 @@ export const Expedition: React.FC<ExpeditionProps> = ({
                               key={v.plate}
                               type="button"
                               onClick={() => {
-                                console.log('Veiculo selecionado:', v.plate, 'Centro de Custo:', v.costCenter);
                                 setReqPlate(v.plate);
                                 setReqCostCenter(v.costCenter || '');
                                 setIsPlateSearchOpen(false);

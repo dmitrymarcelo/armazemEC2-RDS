@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { User } from '../types';
 import { api } from '../api-client';
 
@@ -49,7 +49,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           normalizedError.includes('token invalido') ||
           normalizedError.includes('token ausente');
 
-        setError(isAuthError ? 'Credenciais inválidas ou usuário inativo' : String(response.error));
+        const isApiConnectionError =
+          normalizedError.includes('not found') ||
+          normalizedError.includes('failed to fetch') ||
+          normalizedError.includes('networkerror') ||
+          normalizedError.includes('falha de conexao');
+
+        if (isAuthError) {
+          setError('Credenciais inválidas ou usuário inativo');
+          return;
+        }
+
+        if (isApiConnectionError) {
+          setError('Falha de conexão com a API. Verifique se o backend está rodando na porta 3001.');
+          return;
+        }
+
+        setError(String(response.error));
         return;
       }
 

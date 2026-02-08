@@ -244,6 +244,21 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity TEXT NOT NULL,
+  entity_id TEXT,
+  module TEXT NOT NULL,
+  action TEXT NOT NULL,
+  actor TEXT,
+  actor_id TEXT,
+  warehouse_id VARCHAR(50),
+  before_data JSONB,
+  after_data JSONB,
+  meta JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Conversao de ambientes legados (colunas antigas em TEXT)
 DO $$
 BEGIN
@@ -411,6 +426,10 @@ CREATE INDEX IF NOT EXISTS idx_requests_status_priority ON material_requests(sta
 CREATE INDEX IF NOT EXISTS idx_notifications_user_read_created ON notifications(user_id, read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cyclic_batches_warehouse_created ON cyclic_batches(warehouse_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cyclic_counts_batch ON cyclic_counts(batch_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_module_created ON audit_logs(module, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity, entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created ON audit_logs(actor, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at DESC);
 
 -- Seed principal
 INSERT INTO warehouses (id, name, description, location, manager_name, is_active)

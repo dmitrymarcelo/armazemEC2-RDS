@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { InventoryItem, Vendor, Vehicle } from '../types';
 import * as XLSX from 'xlsx';
+import { PaginationBar } from '../components/PaginationBar';
 
 type Tab = 'itens' | 'fornecedores' | 'frota';
 
@@ -21,6 +22,55 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
 
   // Form States
   const [formData, setFormData] = useState<any>({});
+  
+  // Estados para paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
+  
+  // Estados para busca
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Filtrar itens com base no termo de busca e na aba ativa
+  const filteredItems = () => {
+    if (activeTab === 'itens') {
+      return inventory.filter(item => 
+        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.category.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    } else if (activeTab === 'fornecedores') {
+      return vendors.filter(vendor => 
+        vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vendor.cnpj.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vendor.contact.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    } else { // frota
+      return vehicles.filter(vehicle => 
+        vehicle.plate.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vehicle.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vehicle.type.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+  };
+  
+  // Calcular itens para a página atual
+  const getPaginatedItems = () => {
+    const items = filteredItems();
+    const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+    const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+    return {
+      items: items.slice(indexOfFirstItem, indexOfLastItem),
+      totalItems: items.length,
+      totalPages: Math.ceil(items.length / ITEMS_PER_PAGE)
+    };
+  };
+  
+  // Resetar para a primeira página quando a aba ou termo de busca mudar
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
+  
+  const { items: currentItems, totalItems, totalPages } = getPaginatedItems();
 
   const handleOpenModal = (existingData?: any) => {
     if (existingData) {
@@ -210,12 +260,18 @@ export const MasterData: React.FC<MasterDataProps> = ({ inventory, vendors, vehi
           {activeTab === 'frota' && (
             <button
               onClick={handleSyncAPI}
-              className="px-6 py-4 bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-indigo-500/20 hover:bg-indigo-600 transition-all active:scale-95 flex items-center gap-2"
+              className="px-6 py-3.5 bg-emerald-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-600 transition-all flex items-center gap-3"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9-9a9 9 0 0 0-9 9" />
+              <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 15.25A3.5 3.5 0 0 1 13.5 12c.89 0 1.68.43 2.25 1.09a3.5 3.5 0 0 1 4.42 4.42 3.5 3.5 0 0 1 1.09 2.24c0 .89-.43 1.68-1.09 2.25A3.5 3.5 0 0 1 17 18.75Z" />
+                <path d="M4.5 12a3.5 3.5 0 0 1 5.53-2.63 3.5 3.5 0 0 1 4.42 4.42 3.5 3.5 0 0 1 1.09 2.24c0 .89-.43 1.68-1.09 2.25A3.5 3.5 0 0 1 8.03 11.63" />
+                <path d="M4.5 6.5A3.5 3.5 0 0 1 8.03 3.87a3.5 3.5 0 0 1 4.42 4.42 3.5 3.5 0 0 1 1.09 2.24c0 .89-.43 1.68-1.09 2.25A3.5 3.5 0 0 1 8.03 11.63" />
+                <path d="M17 17.5v.5" />
+                <path d="M17 12.5v.5" />
+                <path d="M17 7.5v.5" />
+                <path d="M17 2.5v.5" />
               </svg>
-              Sincronizar API
+              Sincronizar Frota
             </button>
           )}
 
