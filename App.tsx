@@ -413,7 +413,31 @@ export const App: React.FC = () => {
   useEffect(() => {
     const fetchData = async (warehouseId = activeWarehouse) => {
       try {
-        const { data: whData } = await api.from('warehouses').select('*').eq('is_active', true);
+        const [
+          whResult,
+          _inventoryResult,
+          batchesResult,
+          venResult,
+          vehResult,
+          userResult,
+          poResult,
+          movResult,
+          notifResult,
+          reqResult,
+        ] = await Promise.all([
+          api.from('warehouses').select('*').eq('is_active', true),
+          loadInventoryForWarehouse(warehouseId, INITIAL_INVENTORY_LIMIT),
+          api.from('cyclic_batches').select('*').order('created_at', { ascending: false }),
+          api.from('vendors').select('*'),
+          api.from('vehicles').select('*'),
+          api.from('users').select('*'),
+          api.from('purchase_orders').select('*').order('request_date', { ascending: false }).limit(INITIAL_PURCHASE_ORDERS_LIMIT),
+          api.from('movements').select('*').order('timestamp', { ascending: false }).limit(INITIAL_MOVEMENTS_LIMIT),
+          api.from('notifications').select('*').order('created_at', { ascending: false }).limit(20),
+          api.from('material_requests').select('*').order('created_at', { ascending: false }).limit(INITIAL_MATERIAL_REQUESTS_LIMIT),
+        ]);
+
+        const whData = whResult?.data;
         if (whData) setWarehouses(whData.map((w: any) => ({
           id: w.id,
           name: w.name,
@@ -424,9 +448,7 @@ export const App: React.FC = () => {
           managerEmail: w.manager_email
         })));
 
-        await loadInventoryForWarehouse(warehouseId, INITIAL_INVENTORY_LIMIT);
-
-        const { data: batchesData } = await api.from('cyclic_batches').select('*').order('created_at', { ascending: false });
+        const batchesData = batchesResult?.data;
         if (batchesData) setCyclicBatches(batchesData.map((b: any) => ({
           id: b.id,
           status: b.status,
@@ -438,10 +460,10 @@ export const App: React.FC = () => {
           warehouseId: b.warehouse_id || 'ARMZ28'
         })));
 
-        const { data: venData } = await api.from('vendors').select('*');
+        const venData = venResult?.data;
         if (venData) setVendors(venData);
 
-        const { data: vehData } = await api.from('vehicles').select('*');
+        const vehData = vehResult?.data;
         if (vehData) setVehicles(vehData.map((v: any) => ({
           plate: v.plate,
           model: v.model,
@@ -451,7 +473,7 @@ export const App: React.FC = () => {
           costCenter: v.cost_center
         })));
 
-        const { data: userData } = await api.from('users').select('*');
+        const userData = userResult?.data;
         if (userData) {
           const mappedUsers = userData.map((u: any) => ({
             ...u,
@@ -462,27 +484,19 @@ export const App: React.FC = () => {
           setUsers(mappedUsers);
         }
 
-        const { data: poData } = await api
-          .from('purchase_orders')
-          .select('*')
-          .order('request_date', { ascending: false })
-          .limit(INITIAL_PURCHASE_ORDERS_LIMIT);
+        const poData = poResult?.data;
         if (poData) {
           setPurchaseOrders(mapPurchaseOrders(poData));
           setIsPurchaseOrdersFullyLoaded(poData.length < INITIAL_PURCHASE_ORDERS_LIMIT);
         }
 
-        const { data: movData } = await api
-          .from('movements')
-          .select('*')
-          .order('timestamp', { ascending: false })
-          .limit(INITIAL_MOVEMENTS_LIMIT);
+        const movData = movResult?.data;
         if (movData) {
           setMovements(mapMovements(movData));
           setIsMovementsFullyLoaded(movData.length < INITIAL_MOVEMENTS_LIMIT);
         }
 
-        const { data: notifData } = await api.from('notifications').select('*').order('created_at', { ascending: false }).limit(20);
+        const notifData = notifResult?.data;
         if (notifData) setAppNotifications(notifData.map((n: any) => ({
           id: n.id,
           title: n.title,
@@ -493,14 +507,7 @@ export const App: React.FC = () => {
           userId: n.user_id
         })));
 
-
-
-
-        const { data: reqData } = await api
-          .from('material_requests')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(INITIAL_MATERIAL_REQUESTS_LIMIT);
+        const reqData = reqResult?.data;
         if (reqData) {
           setMaterialRequests(mapMaterialRequests(reqData));
           setIsMaterialRequestsFullyLoaded(reqData.length < INITIAL_MATERIAL_REQUESTS_LIMIT);
