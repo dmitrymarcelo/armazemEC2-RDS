@@ -73,3 +73,15 @@ API_UPSTREAM=http://SEU_BACKEND_PUBLICO:3001 ./deploy-ec2-frontend-only.sh
 ```
 
 Guia detalhado: `docs/hybrid-local-backend-ec2-frontend.md`.
+
+### Opcional via AWS CLI + SSM (Windows)
+Da sua maquina local, voce pode publicar o frontend no EC2 sem SSH:
+
+```powershell
+npm run deploy:hybrid:ec2 -- `
+  -InstanceId i-xxxxxxxxxxxxxxxxx `
+  -ApiUpstream https://api-seu-tunel.exemplo.com `
+  -Region us-east-1 `
+  -Profile 389364614518 `
+  -Branch main
+```

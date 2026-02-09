@@ -225,8 +225,29 @@ class ApiClient implements PromiseLike<any> {
     }
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      return { data: null, error: errData.error || response.statusText, httpStatus: response.status };
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      const errData = contentType.includes('application/json')
+        ? await response.json().catch(() => ({}))
+        : {};
+      const rawText = await response.text().catch(() => '');
+      const fallbackError = (rawText || response.statusText || 'Erro de requisição').trim();
+      const derivedError = String(errData?.error || fallbackError);
+      const normalizedError = derivedError.toLowerCase();
+
+      const isLikelyLocalProxyFailure =
+        normalizedError.includes('econnrefused') ||
+        normalizedError.includes('proxy error') ||
+        (response.status >= 500 && normalizedError === 'internal server error');
+
+      if (this.isLocalBrowserHost() && isLikelyLocalProxyFailure) {
+        return {
+          data: null,
+          error: 'Falha de conexão com a API local. Verifique se o backend está rodando na porta 3001.',
+          httpStatus: response.status,
+        };
+      }
+
+      return { data: null, error: derivedError, httpStatus: response.status };
     }
 
     const payload = await response.json().catch(() => ({}));

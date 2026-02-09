@@ -5,6 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "npm --prefix api-backend run dev",
+    "dev:local": "concurrently -k -n API,WEB -c yellow,cyan \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "local:reset": "powershell -ExecutionPolicy Bypass -File scripts/reset-local-dev.ps1",
+    "dev:local:clean": "npm run local:reset && npm run dev:local",
+    "deploy:hybrid:ec2": "powershell -ExecutionPolicy Bypass -File scripts/deploy-hybrid-frontend-ec2.ps1",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -32,6 +38,7 @@
     "@playwright/test": "^1.58.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

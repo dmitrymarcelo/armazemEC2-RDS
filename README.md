@@ -41,6 +41,12 @@ Arquivo recomendado para backend:
 - `api-backend/.env.example`
 
 ## Executar localmente
+Forma recomendada (limpa portas 3000/3001 e sobe API + frontend):
+```bash
+npm run dev:local:clean
+```
+
+Forma manual:
 Terminal 1 (backend):
 ```bash
 cd api-backend
@@ -55,6 +61,27 @@ npm run dev
 Aplicacao: `http://localhost:3000`
 
 Health backend: `http://localhost:3001/health`
+
+### Troubleshooting rapido (ECONNREFUSED 127.0.0.1:3001)
+Se aparecer erro de proxy do Vite para `/login`, o backend local nao esta ativo na porta `3001`.
+
+Checklist:
+1. Limpar ambiente local:
+```bash
+npm run local:reset
+```
+2. Subir API:
+```bash
+npm run dev:backend
+```
+3. Validar health:
+```bash
+curl http://localhost:3001/health
+```
+4. Em outro terminal, subir frontend:
+```bash
+npm run dev:frontend
+```
 
 ## Ativar PostgreSQL (sair do modo contingencia JSON)
 1. Suba o banco local com Docker:
@@ -92,6 +119,7 @@ npm run local:backend:setup
 ## Modo Híbrido (Backend Local + Frontend EC2)
 - Guia completo: `docs/hybrid-local-backend-ec2-frontend.md`
 - Script EC2 (frontend-only): `deploy-ec2-frontend-only.sh`
+- Script Windows via AWS SSM: `npm run deploy:hybrid:ec2 -- -InstanceId ... -ApiUpstream ...`
 - Template local backend: `api-backend/.env.local.postgres.example`
 
 ## Credenciais seed
