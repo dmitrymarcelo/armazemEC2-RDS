@@ -39,7 +39,8 @@ interface Order {
 interface ExpeditionProps {
   inventory: InventoryItem[];
   vehicles?: Vehicle[];
-  onProcessPicking: (sku: string, qty: number, reason?: string, orderId?: string) => Promise<boolean>;
+  canApproveRequests: boolean;
+  onProcessPicking: (sku: string, qty: number, reason?: string, orderId?: string, warehouseId?: string) => Promise<boolean>;
   requests: MaterialRequest[];
   onRequestCreate: (data: MaterialRequest) => Promise<void>;
   onRequestUpdate: (id: string, status: RequestStatus) => Promise<void>;
@@ -58,6 +59,7 @@ const INITIAL_ORDERS: Order[] = [];
 export const Expedition: React.FC<ExpeditionProps> = ({
   inventory,
   vehicles = [],
+  canApproveRequests,
   onProcessPicking,
   requests,
   onRequestCreate,
@@ -90,6 +92,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
 
   // Form States
   const [reqSku, setReqSku] = useState('');
+  const [reqItemSearch, setReqItemSearch] = useState('');
   const [reqQty, setReqQty] = useState<number | string>(''); // Start empty
   const [reqDept, setReqDept] = useState('');
   const [reqPlate, setReqPlate] = useState('');
@@ -120,6 +123,17 @@ export const Expedition: React.FC<ExpeditionProps> = ({
       .slice(0, 5);
   }, [reqPlate, vehicles, isPlateSearchOpen]);
 
+  const filteredInventoryItems = useMemo(() => {
+    const term = reqItemSearch.toLowerCase().trim();
+    if (!term) return inventory.slice(0, 250);
+    return inventory
+      .filter((item) =>
+        item.sku.toLowerCase().includes(term) ||
+        item.name.toLowerCase().includes(term)
+      )
+      .slice(0, 250);
+  }, [reqItemSearch, inventory]);
+
   const getStockForSku = (sku: string) => {
     return inventory
       .filter(i => i.sku === sku)
@@ -139,7 +153,8 @@ export const Expedition: React.FC<ExpeditionProps> = ({
         item.sku,
         item.qty,
         `Saída para Expedição / Ordem ${orderId}`,
-        orderId
+        orderId,
+        activeWarehouse
       );
       if (!success) {
         allOk = false;
@@ -177,6 +192,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
 
   const resetForm = () => {
     setReqSku('');
+    setReqItemSearch('');
     setReqQty('');
     setReqDept('');
     setReqPlate('');
@@ -200,6 +216,10 @@ export const Expedition: React.FC<ExpeditionProps> = ({
       console.log('Request SKU:', request.sku, 'QTY:', request.qty);
 
       if (request.status === 'aprovacao') {
+        if (!canApproveRequests) {
+          alert('Apenas administrador pode aprovar solicitações SA.');
+          return;
+        }
         console.log('Updating to separacao...');
         await onRequestUpdate(requestId, 'separacao');
         console.log('Updated to separacao successfully!');
@@ -225,8 +245,9 @@ export const Expedition: React.FC<ExpeditionProps> = ({
             const success = await onProcessPicking(
               item.sku,
               item.qty,
-              `Saída por Solicitação SA ${request.id}`,
-              request.id
+              `Saída por Solicitação SA ${request.id} - Placa ${request.plate}`,
+              request.id,
+              request.warehouseId || activeWarehouse
             );
             
             console.log('Process result for', item.sku, ':', success);
@@ -416,7 +437,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
           pageSize={pageSize}
           hasNextPage={hasNextPage}
           isLoading={isPageLoading}
-          itemLabel="solicitacoes"
+        itemLabel="solicitações"
           onPageChange={onPageChange}
         />
 
@@ -478,7 +499,9 @@ export const Expedition: React.FC<ExpeditionProps> = ({
                     {req.status !== 'entregue' ? (
                       <button
                         onClick={() => { void advanceWorkflow(req.id); }}
-                        className={`w-full py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${req.status === 'aprovacao' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                        disabled={req.status === 'aprovacao' && !canApproveRequests}
+                        title={req.status === 'aprovacao' && !canApproveRequests ? 'Somente administrador pode aprovar solicitações SA.' : undefined}
+                        className={`w-full py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${req.status === 'aprovacao' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
                           }`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -515,7 +538,7 @@ export const Expedition: React.FC<ExpeditionProps> = ({
           </div>
         ) : (
           <div className="bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 rounded-2xl px-6 py-16 text-center text-slate-400 text-xs font-black uppercase tracking-widest">
-            {isPageLoading ? 'Carregando solicitacoes...' : 'Nenhuma solicitacao registrada neste armazem.'}
+            {isPageLoading ? 'Carregando solicitações...' : 'Nenhuma solicitação registrada neste armazém.'}
           </div>
         )}
       </div>
@@ -648,14 +671,23 @@ export const Expedition: React.FC<ExpeditionProps> = ({
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selecione o Item (Cód. Produto)</label>
+                  <input
+                    type="text"
+                    value={reqItemSearch}
+                    onChange={(e) => setReqItemSearch(e.target.value)}
+                    placeholder="Digite o código ou nome do item..."
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-bold text-sm transition-all text-slate-800 dark:text-white"
+                  />
                   <select
                     required
                     value={reqSku}
                     onChange={(e) => setReqSku(e.target.value)}
                     className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 focus:border-primary focus:ring-0 rounded-2xl font-black text-sm transition-all text-slate-800 dark:text-white"
                   >
-                    <option value="">Pesquisar no inventário...</option>
-                    {inventory.map(item => (
+                    <option value="">
+                      {reqItemSearch ? `Resultados: ${filteredInventoryItems.length}` : 'Pesquisar no inventário...'}
+                    </option>
+                    {filteredInventoryItems.map(item => (
                       <option key={item.sku} value={item.sku}>{item.sku} - {item.name}</option>
                     ))}
                   </select>
@@ -956,12 +988,16 @@ export const Expedition: React.FC<ExpeditionProps> = ({
                   <select
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value as RequestStatus)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-black text-sm"
+                    disabled={editingRequest?.status === 'aprovacao' && !canApproveRequests}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-xl font-black text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="aprovacao">Aprovação</option>
                     <option value="separacao">Separação</option>
                     <option value="entregue">Entregue</option>
                   </select>
+                  {editingRequest?.status === 'aprovacao' && !canApproveRequests && (
+                    <p className="text-[10px] font-bold text-amber-600">Somente administrador pode aprovar esta solicitação.</p>
+                  )}
                 </div>
               </div>
 

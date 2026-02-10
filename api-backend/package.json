@@ -13,6 +13,9 @@
         "clean:local": "node scripts/cleanup-local-artifacts.mjs",
         "seed:reset": "node scripts/reset-test-data.mjs",
         "seed:step": "node scripts/seed-step-data.mjs",
+        "import:xlsx:vehicles": "node scripts/import-xlsx-vehicles.mjs",
+        "import:xlsx:inventory": "node scripts/import-xlsx-inventory.mjs",
+        "import:xlsx:vendors": "node scripts/import-xlsx-vendors.mjs",
         "seed:demo50": "node scripts/seed-big-data.mjs --scale demo50",
         "seed:bigdata": "node scripts/seed-big-data.mjs --scale large",
         "seed:bigdata:xlarge": "node scripts/seed-big-data.mjs --scale xlarge",
@@ -25,7 +28,8 @@
         "express": "^4.18.3",
         "helmet": "^8.1.0",
         "jsonwebtoken": "^9.0.3",
-        "pg": "^8.11.3"
+        "pg": "^8.11.3",
+        "xlsx": "^0.18.5"
     },
     "devDependencies": {
         "nodemon": "^3.1.11"

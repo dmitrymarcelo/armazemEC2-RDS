@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Vehicle, VehicleDetail, InventoryItem } from '../../types';
 
 interface VehicleManagementProps {
   vehicles: Vehicle[];
   vehicleDetails: VehicleDetail[];
   inventory: InventoryItem[];
-  onAddVehicle: (vehicle: Omit<Vehicle, 'id'>) => void;
+  onAddVehicle: (vehicle: Vehicle) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
   onDeleteVehicle: (id: string) => void;
   onSyncFleetAPI?: (token: string) => void;
   onRequestParts: (vehiclePlate: string, items: { sku: string; name: string; qty: number }[]) => void;
-  onImportVehicles?: (vehicles: Omit<Vehicle, 'id'>[]) => void;
+  onImportVehicles?: (vehicles: Vehicle[]) => void;
 }
 
 export const VehicleManagement: React.FC<VehicleManagementProps> = ({
@@ -34,8 +35,8 @@ export const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [formData, setFormData] = useState<Partial<Vehicle>>({
     plate: '',
     model: '',
-    type: 'caminhao',
-    status: 'ativo',
+    type: 'PROPRIO',
+    status: 'Disponivel',
     costCenter: ''
   });
 
@@ -50,6 +51,47 @@ export const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [importData, setImportData] = useState<string>('');
   const [importPreview, setImportPreview] = useState<Vehicle[]>([]);
   const [importErrors, setImportErrors] = useState<string[]>([]);
+
+  const normalizeHeader = (value: unknown) =>
+    String(value || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const normalizeText = (value: unknown) => String(value || '').replace(/\s+/g, ' ').trim();
+
+  const toVehiclePlate = (value: unknown) => {
+    const raw = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!raw) return '';
+    if (/^[A-Z]{3}\d{4}$/.test(raw)) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+    if (/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(raw)) return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+    return raw;
+  };
+
+  const isValidPlate = (value: string) => {
+    const compact = value.replace(/-/g, '');
+    return /^[A-Z]{3}\d{4}$/.test(compact) || /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(compact);
+  };
+
+  const normalizeStatus = (value: unknown): string => {
+    const token = normalizeHeader(value);
+    if (token.includes('vencid') || token.includes('manut') || token.includes('oficina')) return 'Manutencao';
+    if (token.includes('viagem') || token.includes('transito')) return 'Em Viagem';
+    if (token.includes('inativ') || token.includes('bloque')) return 'Inativo';
+    return 'Disponivel';
+  };
+
+  const getRowValue = (row: Record<string, unknown>, aliases: string[]) => {
+    const keys = Object.keys(row || {});
+    for (const alias of aliases) {
+      const target = normalizeHeader(alias);
+      const matched = keys.find((key) => normalizeHeader(key) === target);
+      if (matched) return row[matched];
+    }
+    return undefined;
+  };
 
   const filteredVehicles = vehicles.filter(v => 
     v.plate.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -66,8 +108,8 @@ export const VehicleManagement: React.FC<VehicleManagementProps> = ({
       setFormData({
         plate: '',
         model: '',
-        type: 'caminhao',
-        status: 'ativo',
+        type: 'PROPRIO',
+        status: 'Disponivel',
         costCenter: ''
       });
       setIsEditing(false);
@@ -81,7 +123,7 @@ export const VehicleManagement: React.FC<VehicleManagementProps> = ({
     if (isEditing && selectedVehicle) {
       onUpdateVehicle({ ...selectedVehicle, ...formData } as Vehicle);
     } else {
-      onAddVehicle(formData as Omit<Vehicle, 'id'>);
+      onAddVehicle(formData as Vehicle);
     }
     setIsModalOpen(false);
   };
@@ -126,65 +168,156 @@ export const VehicleManagement: React.FC<VehicleManagementProps> = ({
   };
 
   const handleDownloadTemplate = () => {
-    const template = `PLACA,MODELO,TIPO,STATUS,CENTRO_CUSTO,ULTIMA_MANUTENCAO
-BGM-1001,Volvo FH 540,Caminhão,Disponível,OPS-CD,15/01/2026
-CHN-1002,Mercedes Actros,Carreta,Disponível,MAN-OFI,20/01/2026
-DIO-1003,Volvo FH 460,Utilitário,Em Viagem,OPS-CD,10/01/2026
-ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
-    
-    const blob = new Blob([template], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'template_veiculos.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
+    const headers = [
+      'Prioridade Data',
+      'Prioridade KM',
+      'KM Proxima Manutenção',
+      'Placa',
+      'Modelo',
+      'Modalidade',
+      'Centro de custo',
+      'Motorista',
+      'Lotação',
+      'Data Última Manutenção',
+      'Km/Horímetro Ult. Manutenção',
+      'Km/Horímetro Atual',
+      'Km/Horímetro Próx. Manu.',
+      'Km Falta/Ultrap',
+      'Data Proxima Manutenção',
+      'Situação',
+    ];
+
+    const templateRows = [
+      {
+        'Prioridade Data': 1,
+        'Prioridade KM': 1,
+        'KM Proxima Manutenção': 193512,
+        Placa: 'LAN1005',
+        Modelo: '90 HP',
+        Modalidade: 'PROPRIO',
+        'Centro de custo': 'MULTIFUNCIONAL INTERIOR',
+        Motorista: 'NOME MOTORISTA',
+        'Lotação': 'PAR - PARINTINS',
+        'Data Última Manutenção': '30/12/2025 04:00:00',
+        'Km/Horímetro Ult. Manutenção': 193511,
+        'Km/Horímetro Atual': 50015,
+        'Km/Horímetro Próx. Manu.': 193512,
+        'Km Falta/Ultrap': 143497,
+        'Data Proxima Manutenção': '30/01/2026',
+        'Situação': 'Vencida',
+      },
+      {
+        'Prioridade Data': 2,
+        'Prioridade KM': 5,
+        'KM Proxima Manutenção': 88500,
+        Placa: 'ABC1234',
+        Modelo: 'MB ACTROS 2548',
+        Modalidade: 'PROPRIO',
+        'Centro de custo': 'OPERACAO CD',
+        Motorista: 'NOME MOTORISTA 2',
+        'Lotação': 'MANAUS',
+        'Data Última Manutenção': '10/01/2026 08:00:00',
+        'Km/Horímetro Ult. Manutenção': 86000,
+        'Km/Horímetro Atual': 87020,
+        'Km/Horímetro Próx. Manu.': 88500,
+        'Km Falta/Ultrap': 1480,
+        'Data Proxima Manutenção': '28/02/2026',
+        'Situação': 'A vencer',
+      },
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(templateRows, { header: headers });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
+    XLSX.writeFile(workbook, 'template_frota_logiwms.xlsx');
   };
 
-  const parseImportData = (data: string) => {
-    const lines = data.trim().split('\n');
+  const parseRowsToVehicles = (rows: Record<string, unknown>[]) => {
     const errors: string[] = [];
-    const parsed: Vehicle[] = [];
+    const parsedByPlate = new Map<string, Vehicle>();
 
-    // Skip header if first line contains PLACA or MODELO
-    const startIndex = lines[0].toUpperCase().includes('PLACA') || lines[0].toUpperCase().includes('MODELO') ? 1 : 0;
-
-    for (let i = startIndex; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const parts = line.split(',').map(p => p.trim());
-      if (parts.length < 5) {
-        errors.push(`Linha ${i + 1}: dados incompletos`);
-        continue;
-      }
-
-      const [plate, model, type, status, costCenter, lastMaintenance] = parts;
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      const plate = toVehiclePlate(getRowValue(row, ['Placa', 'PLACA', 'cod_placa']));
+      const model = normalizeText(getRowValue(row, ['Modelo', 'MODELO', 'modelo_veiculo']));
+      const type = normalizeText(getRowValue(row, ['Modalidade', 'Tipo', 'TIPO'])) || 'PROPRIO';
+      const status = normalizeStatus(getRowValue(row, ['Situação', 'Situacao', 'Status']));
+      const costCenter = normalizeText(
+        getRowValue(row, ['Centro de custo', 'Centro de Custo', 'CENTRO_CUSTO', 'Cost Center'])
+      );
+      const lastMaintenance = normalizeText(
+        getRowValue(row, ['Data Última Manutenção', 'Data Ultima Manutencao', 'ULTIMA_MANUTENCAO'])
+      );
 
       if (!plate || !model) {
-        errors.push(`Linha ${i + 1}: placa e modelo são obrigatórios`);
-        continue;
+        errors.push(`Linha ${rowNumber}: placa e modelo sao obrigatorios`);
+        return;
       }
 
-      // Validate plate format (simple validation)
-      const plateRegex = /^[A-Z]{3}-\d{4}$/i;
-      if (!plateRegex.test(plate) && !/^\d{4}[A-Z]{3}$/i.test(plate)) {
-        errors.push(`Linha ${i + 1}: formato de placa inválido "${plate}"`);
-        continue;
+      if (!isValidPlate(plate)) {
+        errors.push(`Linha ${rowNumber}: formato de placa invalido "${plate}"`);
+        return;
       }
 
-      parsed.push({
-        plate: plate.toUpperCase(),
+      parsedByPlate.set(plate, {
+        plate,
         model,
-        type: type || 'Caminhão',
-        status: status || 'Disponível',
+        type,
+        status,
         costCenter: costCenter || 'OPS-CD',
-        lastMaintenance: lastMaintenance || new Date().toLocaleDateString('pt-BR')
+        lastMaintenance: lastMaintenance || new Date().toLocaleDateString('pt-BR'),
       });
-    }
+    });
 
+    const parsed = Array.from(parsedByPlate.values());
     setImportPreview(parsed);
     setImportErrors(errors);
     return parsed;
+  };
+
+  const parseImportData = (data: string) => {
+    const trimmed = data.trim();
+    if (!trimmed) {
+      setImportPreview([]);
+      setImportErrors([]);
+      return [];
+    }
+
+    try {
+      const workbook = XLSX.read(trimmed, { type: 'string' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+      if (rows.length > 0) {
+        return parseRowsToVehicles(rows);
+      }
+    } catch {
+      // Fallback parser abaixo.
+    }
+
+    const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      setImportPreview([]);
+      setImportErrors([]);
+      return [];
+    }
+
+    const headerLine = lines[0];
+    const headers = headerLine.split(',').map((part) => part.trim());
+    const dataLines =
+      headerLine.toUpperCase().includes('PLACA') || headerLine.toUpperCase().includes('MODELO')
+        ? lines.slice(1)
+        : lines;
+
+    const rows = dataLines.map((line) => {
+      const values = line.split(',').map((part) => part.trim());
+      const row: Record<string, unknown> = {};
+      headers.forEach((header, index) => {
+        row[header || `COL_${index}`] = values[index] || '';
+      });
+      return row;
+    });
+
+    return parseRowsToVehicles(rows);
   };
 
   const handleProcessImport = () => {
@@ -193,8 +326,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
     if (onImportVehicles) {
       onImportVehicles(importPreview);
     } else {
-      // Fallback: add vehicles one by one
-      importPreview.forEach(vehicle => onAddVehicle(vehicle));
+      importPreview.forEach((vehicle) => onAddVehicle(vehicle));
     }
 
     setIsImportModalOpen(false);
@@ -207,22 +339,53 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
     const reader = new FileReader();
+
     reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setImportData(content);
-      parseImportData(content);
+      if (!event.target?.result) return;
+
+      try {
+        if (extension === 'xlsx' || extension === 'xls') {
+          const workbook = XLSX.read(event.target.result as ArrayBuffer, { type: 'array' });
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+          setImportData(`[arquivo] ${file.name}`);
+          parseRowsToVehicles(rows);
+          return;
+        }
+
+        const content = event.target.result as string;
+        setImportData(content);
+        parseImportData(content);
+      } catch {
+        setImportPreview([]);
+        setImportErrors(['Falha ao ler arquivo. Use XLSX ou CSV com colunas validas.']);
+      }
     };
-    reader.readAsText(file);
+
+    if (extension === 'xlsx' || extension === 'xls') {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'ativo': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
-      case 'manutencao': return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
-      case 'inativo': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-      default: return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
+    const token = normalizeHeader(status);
+    if (token.includes('dispon') || token.includes('ativo')) {
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
     }
+    if (token.includes('viagem') || token.includes('transito')) {
+      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    }
+    if (token.includes('manut') || token.includes('vencid')) {
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+    }
+    if (token.includes('inativ') || token.includes('bloque')) {
+      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    }
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
   };
 
   return (
@@ -230,9 +393,9 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Gestão de Frota</h2>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">GestÃ£o de Frota</h2>
           <p className="text-slate-600 dark:text-slate-400 mt-1">
-            Cadastre veículos e solicite peças diretamente do armazém
+            Cadastre veÃ­culos e solicite peÃ§as diretamente do armazÃ©m
           </p>
         </div>
         <div className="flex gap-2">
@@ -263,7 +426,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Novo Veículo
+            Novo VeÃ­culo
           </button>
         </div>
       </div>
@@ -319,7 +482,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                 </div>
                 {detail && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 dark:text-slate-400">Próx. Manutenção:</span>
+                    <span className="text-slate-500 dark:text-slate-400">PrÃ³x. ManutenÃ§Ã£o:</span>
                     <span className="text-slate-700 dark:text-slate-300">
                       {detail.nextServiceDate || (detail.nextServiceKm ? `${detail.nextServiceKm.toLocaleString()} km` : 'N/A')}
                     </span>
@@ -341,7 +504,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                   </svg>
-                  Solicitar Peças
+                  Solicitar PeÃ§as
                 </button>
               </div>
             </div>
@@ -357,10 +520,10 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
             </svg>
           </div>
-          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Nenhum veículo encontrado</h3>
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Nenhum veÃ­culo encontrado</h3>
           <p className="text-slate-500 dark:text-slate-400">
             {searchTerm ? 'Tente ajustar sua busca ou ' : ''}
-            cadastre um novo veículo para começar.
+            cadastre um novo veÃ­culo para comeÃ§ar.
           </p>
         </div>
       )}
@@ -371,7 +534,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                {isEditing ? 'Editar Veículo' : 'Novo Veículo'}
+                {isEditing ? 'Editar VeÃ­culo' : 'Novo VeÃ­culo'}
               </h3>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -411,12 +574,11 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                     onChange={(e) => setFormData({ ...formData, type: e.target.value as Vehicle['type'] })}
                     className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="caminhao">Caminhão</option>
-                    <option value="van">Van</option>
-                    <option value="carro">Carro</option>
-                    <option value="onibus">Ônibus</option>
-                    <option value="trator">Trator</option>
-                    <option value="empilhadeira">Empilhadeira</option>
+                    <option value="PROPRIO">Proprio</option>
+                    <option value="TERCEIRO">Terceiro</option>
+                    <option value="ALUGADO">Alugado</option>
+                    <option value="IMPLEMENTO">Implemento</option>
+                    <option value="EMBARCACAO">Embarcacao</option>
                   </select>
                 </div>
                 <div>
@@ -428,9 +590,10 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                     onChange={(e) => setFormData({ ...formData, status: e.target.value as Vehicle['status'] })}
                     className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="ativo">Ativo</option>
-                    <option value="manutencao">Em Manutenção</option>
-                    <option value="inativo">Inativo</option>
+                    <option value="Disponivel">Disponivel</option>
+                    <option value="Em Viagem">Em Viagem</option>
+                    <option value="Manutencao">Manutencao</option>
+                    <option value="Inativo">Inativo</option>
                   </select>
                 </div>
               </div>
@@ -472,10 +635,10 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                Solicitar Peças - {selectedVehicle.plate}
+                Solicitar PeÃ§as - {selectedVehicle.plate}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Selecione os itens do armazém para solicitar para este veículo
+                Selecione os itens do armazÃ©m para solicitar para este veÃ­culo
               </p>
             </div>
             <div className="p-6 space-y-4">
@@ -484,7 +647,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Item do Armazém
+                      Item do ArmazÃ©m
                     </label>
                     <select
                       value={selectedInventoryItem?.sku || ''}
@@ -538,9 +701,9 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                       <thead className="bg-slate-50 dark:bg-slate-900/50">
                         <tr>
                           <th className="px-4 py-2 text-left text-slate-700 dark:text-slate-300">SKU</th>
-                          <th className="px-4 py-2 text-left text-slate-700 dark:text-slate-300">Descrição</th>
+                          <th className="px-4 py-2 text-left text-slate-700 dark:text-slate-300">DescriÃ§Ã£o</th>
                           <th className="px-4 py-2 text-center text-slate-700 dark:text-slate-300">Qtd</th>
-                          <th className="px-4 py-2 text-center text-slate-700 dark:text-slate-300">Ação</th>
+                          <th className="px-4 py-2 text-center text-slate-700 dark:text-slate-300">AÃ§Ã£o</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -568,7 +731,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
               ) : (
                 <div className="text-center py-8 bg-slate-50 dark:bg-slate-900/50 rounded-xl">
                   <p className="text-slate-500 dark:text-slate-400">
-                    Nenhum item adicionado. Selecione itens do armazém acima.
+                    Nenhum item adicionado. Selecione itens do armazÃ©m acima.
                   </p>
                 </div>
               )}
@@ -590,7 +753,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  Enviar Solicitação SA
+                  Enviar SolicitaÃ§Ã£o SA
                 </button>
               </div>
             </div>
@@ -604,10 +767,10 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                Importar Veículos em Massa
+                Importar Frota em Massa
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Faça upload de um arquivo CSV ou cole os dados diretamente
+                Envie XLSX (template frota) ou CSV com placa, modelo e centro de custo
               </p>
             </div>
             <div className="p-6 space-y-4">
@@ -616,10 +779,10 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                      Baixe o template de importação
+                      Baixe o template oficial de frota
                     </p>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                      Formato: PLACA, MODELO, TIPO, STATUS, CENTRO_CUSTO, ULTIMA_MANUTENCAO
+                      Colunas principais consumidas: Placa, Modelo, Centro de custo, Modalidade, Situação
                     </p>
                   </div>
                   <button
@@ -629,7 +792,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    Template CSV
+                    Template XLSX
                   </button>
                 </div>
               </div>
@@ -637,11 +800,11 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
               {/* File Upload */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Arquivo CSV
+                  Arquivo XLSX/CSV
                 </label>
                 <input
                   type="file"
-                  accept=".csv,.txt"
+                  accept=".xlsx,.xls,.csv,.txt"
                   onChange={handleFileUpload}
                   className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
@@ -658,7 +821,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                     setImportData(e.target.value);
                     parseImportData(e.target.value);
                   }}
-                  placeholder="PLACA,MODELO,TIPO,STATUS,CENTRO_CUSTO,ULTIMA_MANUTENCAO&#10;BGM-1001,Volvo FH 540,Caminhão,Disponível,OPS-CD,15/01/2026"
+                  placeholder="Placa,Modelo,Modalidade,Centro de custo,Situação&#10;LAN1005,90 HP,PROPRIO,MULTIFUNCIONAL INTERIOR,Vencida"
                   rows={6}
                   className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -668,7 +831,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
               {importPreview.length > 0 && (
                 <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4">
                   <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
-                    Pré-visualização ({importPreview.length} veículos):
+                    PrÃ©-visualizaÃ§Ã£o ({importPreview.length} veÃ­culos):
                   </h4>
                   <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-sm">
@@ -692,7 +855,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                         {importPreview.length > 10 && (
                           <tr>
                             <td colSpan={4} className="px-3 py-2 text-center text-slate-500 dark:text-slate-400 italic">
-                              ... e mais {importPreview.length - 10} veículos
+                              ... e mais {importPreview.length - 10} veÃ­culos
                             </td>
                           </tr>
                         )}
@@ -711,7 +874,7 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
                   <ul className="text-sm text-red-700 dark:text-red-300 space-y-1 max-h-32 overflow-y-auto">
                     {importErrors.map((error, index) => (
                       <li key={index} className="flex items-start gap-2">
-                        <span className="text-red-500">•</span>
+                        <span className="text-red-500">â€¢</span>
                         {error}
                       </li>
                     ))}
@@ -752,3 +915,5 @@ ELQ-1004,Scania R450,Caminhão,Manutenção,OPS-CD,25/01/2026`;
     </div>
   );
 };
+
+

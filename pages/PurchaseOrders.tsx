@@ -22,6 +22,7 @@ interface PurchaseOrdersProps {
   onMarkAsSent: (poId: string, vendorOrderNumber: string) => void;
   onApprove: (id: string) => void;
   onReject: (id: string, reason?: string) => void;
+  onDeleteOrder: (id: string) => void;
 }
 const getStatusColor = (status: PurchaseOrder['status']) => {
   switch (status) {
@@ -292,7 +293,8 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
   onSendToApproval,
   onMarkAsSent,
   onApprove,
-  onReject
+  onReject,
+  onDeleteOrder
 }) => {
   const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -792,6 +794,22 @@ export const PurchaseOrders: React.FC<PurchaseOrdersProps> = ({
                           className="px-4 py-2 bg-green-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-green-600 transition-all active:scale-95"
                         >
                           Marcar como Enviado
+                        </button>
+                      )}
+
+                      {user.role === 'admin' && (
+                        <button
+                          onClick={() => {
+                            if (order.status === 'recebido') return;
+                            if (window.confirm(`Deseja remover o pedido ${order.id}?`)) {
+                              onDeleteOrder(order.id);
+                            }
+                          }}
+                          disabled={order.status === 'recebido'}
+                          title={order.status === 'recebido' ? 'Pedido recebido não pode ser removido.' : 'Remover pedido'}
+                          className="px-4 py-2 bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-all active:scale-95 disabled:bg-red-200 disabled:text-red-50 disabled:cursor-not-allowed"
+                        >
+                          Remover
                         </button>
                       )}
                     </div>

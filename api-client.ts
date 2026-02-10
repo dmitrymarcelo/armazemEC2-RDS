@@ -1,59 +1,24 @@
-﻿const AUTH_TOKEN_KEY = 'auth_token';
+const AUTH_TOKEN_KEY = 'auth_token';
 
-const getData = (key: string): any[] => {
-  try {
-    const data = localStorage.getItem(`logiwms_${key}`);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
+const trimSlash = (value: string) => value.replace(/\/+$/, '');
+
+const resolveBaseUrl = () => {
+  const envUrl = String(import.meta.env.VITE_API_URL || '').trim();
+  if (!envUrl) return '/api';
+  if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
+    return trimSlash(envUrl);
   }
+  return trimSlash(envUrl.startsWith('/') ? envUrl : `/${envUrl}`);
 };
 
-const setData = (key: string, data: any[]) => {
-  try {
-    localStorage.setItem(`logiwms_${key}`, JSON.stringify(data));
-  } catch (e) {
-    console.error('Error saving:', e);
-  }
-};
+const API_BASE_URL = resolveBaseUrl();
 
-// Init mock data
-const initData = () => {
-  if (!localStorage.getItem('logiwms_warehouses')) {
-    setData('warehouses', [
-      { id: 'ARMZ28', name: 'CD Manaus', description: 'Centro Manaus', location: 'Manaus - AM', is_active: true, manager_name: 'João', manager_email: 'joao@logiwms.com' },
-      { id: 'ARMZ33', name: 'CD São Paulo', description: 'Centro SP', location: 'São Paulo - SP', is_active: true, manager_name: 'Maria', manager_email: 'maria@logiwms.com' }
-    ]);
-    setData('inventory', [
-      { sku: 'SKU-000028', name: 'Item Teste 28', location: 'A-01-01', batch: 'B001', expiry: '2026-12-31', quantity: 50, status: 'disponivel', image_url: '', category: 'Teste', unit: 'UN', min_qty: 10, max_qty: 100, lead_time: 7, safety_stock: 5, warehouse_id: 'ARMZ28' },
-      { sku: 'SKU-000030', name: 'Item Teste 30', location: 'A-01-02', batch: 'B002', expiry: '2026-12-31', quantity: 25, status: 'disponivel', image_url: '', category: 'Teste', unit: 'UN', min_qty: 5, max_qty: 50, lead_time: 7, safety_stock: 5, warehouse_id: 'ARMZ28' },
-      { sku: 'OLEO-15W40', name: 'Óleo Motor', location: 'C-01-01', batch: 'B004', expiry: '2027-06-30', quantity: 200, status: 'disponivel', image_url: '', category: 'Óleo', unit: 'L', min_qty: 50, max_qty: 500, lead_time: 10, safety_stock: 25, warehouse_id: 'ARMZ28' }
-    ]);
-    setData('vehicles', [
-      { plate: 'BGM-1001', model: 'Volvo FH 540', type: 'Caminhão', status: 'Disponível', last_maintenance: '15/01/2026', cost_center: 'OPS-CD' },
-      { plate: 'CHN-1002', model: 'Mercedes', type: 'Carreta', status: 'Disponível', last_maintenance: '20/01/2026', cost_center: 'MAN-OFI' }
-    ]);
-    setData('material_requests', [
-      { id: 'REQ-6037', sku: 'SKU-000028', name: 'Item Teste 28', qty: 2, plate: 'BGM-1001', dept: 'OF-OPERAÇÕES', priority: 'normal', status: 'aprovacao', created_at: new Date().toISOString(), cost_center: 'OPS-CD', warehouse_id: 'ARMZ28' },
-      { id: 'REQ-TEST-000041', sku: 'SKU-000030', name: 'Item Teste 30', qty: 1, plate: 'CHN-1002', dept: 'MAN-OFICINA', priority: 'alta', status: 'separacao', created_at: new Date().toISOString(), cost_center: 'MAN-OFI', warehouse_id: 'ARMZ28' }
-    ]);
-    setData('users', [
-      { id: 'admin', name: 'Administrador', email: 'admin@logiwms.com', role: 'admin', status: 'active', modules: ['warehouse'], allowed_warehouses: ['ARMZ28'], password: 'admin' },
-      { id: 'oper', name: 'Operador', email: 'oper@logiwms.com', role: 'operador', status: 'active', modules: ['warehouse'], allowed_warehouses: ['ARMZ28'], password: 'oper' }
-    ]);
-    setData('movements', []);
-    setData('purchase_orders', []);
-  }
-};
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
-if (typeof window !== 'undefined') {
-  initData();
-}
-
-class ApiClient {
+class ApiClient implements PromiseLike<any> {
   private table = '';
   private queryParams: Record<string, string> = {};
-  private method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET';
+  private method: HttpMethod = 'GET';
   private bodyData: any = null;
   private authToken: string | null = null;
 
@@ -64,15 +29,16 @@ class ApiClient {
   }
 
   from(table: string) {
-    this.table = table;
+    this.table = table.replace(/^\/+/, '');
     this.queryParams = {};
     this.method = 'GET';
     this.bodyData = null;
     return this;
   }
 
-  select(_cols?: string) {
+  select(columns = '*') {
     this.method = 'GET';
+    this.queryParams.select = columns;
     return this;
   }
 
@@ -124,63 +90,61 @@ class ApiClient {
     }
   }
 
+  getAuthToken() {
+    return this.authToken;
+  }
+
+  getBaseUrl() {
+    return API_BASE_URL;
+  }
+
+  clearAuthToken() {
+    this.setAuthToken(null);
+  }
+
+  private buildUrl() {
+    const finalUrl = new URL(`${API_BASE_URL}/${this.table}`, window.location.origin);
+    for (const [key, value] of Object.entries(this.queryParams)) {
+      finalUrl.searchParams.append(key, value);
+    }
+    return finalUrl;
+  }
+
   async execute() {
-    let data = getData(this.table);
+    try {
+      const url = this.buildUrl();
+      const headers: Record<string, string> = { Accept: 'application/json' };
 
-    // Apply filters
-    Object.entries(this.queryParams).forEach(([key, value]) => {
-      if (key !== 'select' && key !== 'order' && key !== 'limit' && key !== 'offset') {
-        data = data.filter((item: any) => String(item[key]) === value);
+      if (this.authToken) {
+        headers.Authorization = `Bearer ${this.authToken}`;
       }
-    });
-
-    // Apply sorting
-    if (this.queryParams.order) {
-      const [field, dir] = this.queryParams.order.split(':');
-      data.sort((a: any, b: any) => {
-        if (a[field] < b[field]) return dir === 'asc' ? -1 : 1;
-        if (a[field] > b[field]) return dir === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    // Apply pagination
-    const limit = this.queryParams.limit ? parseInt(this.queryParams.limit, 10) : data.length;
-    const offset = this.queryParams.offset ? parseInt(this.queryParams.offset, 10) : 0;
-
-    if (this.method === 'POST' && this.bodyData) {
-      const newItem = { ...this.bodyData };
-      data.unshift(newItem);
-      setData(this.table, data);
-      return { data: newItem, error: null };
-    }
-
-    if (this.method === 'PATCH' && this.bodyData) {
-      const updatedItems = data.map((item: any) => {
-        const matches = Object.entries(this.queryParams).every(([k, v]) =>
-          k === 'select' || k === 'order' || k === 'limit' || k === 'offset' || item[k] === v
-        );
-        return matches ? { ...item, ...this.bodyData } : item;
-      });
-      setData(this.table, updatedItems);
-      return { data: this.bodyData, error: null };
-    }
-
-    if (this.method === 'DELETE') {
-      const filterKeys = Object.keys(this.queryParams).filter(k =>
-        k !== 'select' && k !== 'order' && k !== 'limit' && k !== 'offset'
-      );
-      if (filterKeys.length > 0) {
-        const remaining = data.filter((item: any) =>
-          !filterKeys.every(k => item[k] === this.queryParams[k])
-        );
-        setData(this.table, remaining);
+      if (this.bodyData !== null && this.bodyData !== undefined) {
+        headers['Content-Type'] = 'application/json';
       }
-      return { data: null, error: null };
-    }
 
-    const paginated = data.slice(offset, offset + limit);
-    return { data: paginated, error: null };
+      const response = await fetch(url.toString(), {
+        method: this.method,
+        headers,
+        body: this.bodyData !== null && this.bodyData !== undefined ? JSON.stringify(this.bodyData) : undefined,
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      const payload = contentType.includes('application/json')
+        ? await response.json()
+        : { data: null, error: await response.text() };
+
+      if (!response.ok) {
+        return {
+          data: null,
+          error: payload?.error || response.statusText || 'Erro na API',
+          status: response.status,
+        };
+      }
+
+      return payload;
+    } catch (err: any) {
+      return { data: null, error: err?.message || 'Falha de conexao' };
+    }
   }
 
   then<TResult1 = any, TResult2 = never>(

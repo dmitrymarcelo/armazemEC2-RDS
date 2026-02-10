@@ -26,8 +26,8 @@ export const ROLE_LABELS = {
 
 export const PO_STATUS_LABELS = {
   rascunho: 'Rascunho',
-  requisicao: 'RequisiÃ§Ã£o',
-  cotacao: 'CotaÃ§Ã£o',
+  requisicao: 'Requisição',
+  cotacao: 'Cotação',
   pendente: 'Pendente',
   aprovado: 'Aprovado',
   enviado: 'Enviado',
@@ -36,9 +36,9 @@ export const PO_STATUS_LABELS = {
 };
 
 export const INVENTORY_STATUS_LABELS = {
-  disponivel: 'DisponÃ­vel',
+  disponivel: 'Disponível',
   vencimento: 'Vencimento',
-  transito: 'TrÃ¢nsito',
+  transito: 'Trânsito',
   divergente: 'Divergente',
   excesso: 'Excesso'
 };
@@ -175,7 +175,7 @@ export interface Vehicle {
   model: string;
   type: string; // Expanded to support API types like LANCHA, PASSEIO, etc.
   lastMaintenance: string;
-  status: 'DisponÃ­vel' | 'Em Viagem' | 'ManutenÃ§Ã£o' | string;
+  status: 'Disponível' | 'Em Viagem' | 'Manutenção' | string;
   costCenter?: string;
 }
 

@@ -139,6 +139,62 @@ export const App: React.FC = () => {
     mechanicsOccupied: 3
   });
 
+  const normalizeVehiclePlate = (value: unknown) => {
+    const raw = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!raw) return '';
+    if (/^[A-Z]{3}\d{4}$/.test(raw) || /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(raw)) {
+      return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+    }
+    return raw;
+  };
+
+  const normalizeVehicleStatus = (value: unknown): Vehicle['status'] => {
+    const token = String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+    if (token.includes('inativ') || token.includes('bloque')) return 'Inativo';
+    if (token.includes('manut') || token.includes('vencid') || token.includes('oficina')) return 'Manutencao';
+    if (token.includes('viagem') || token.includes('transito')) return 'Em Viagem';
+    return 'Disponivel';
+  };
+
+  const toVehiclePayload = (vehicle: Vehicle) => ({
+    plate: vehicle.plate,
+    model: vehicle.model,
+    type: vehicle.type,
+    status: vehicle.status,
+    cost_center: vehicle.costCenter || null,
+    last_maintenance: toIsoDateTime(vehicle.lastMaintenance),
+  });
+
+  const mapVehicleRowToState = (row: any): Vehicle => ({
+    plate: normalizeVehiclePlate(row?.plate),
+    model: String(row?.model || ''),
+    type: String(row?.type || 'PROPRIO'),
+    status: normalizeVehicleStatus(row?.status),
+    lastMaintenance: toPtBrDateTime(row?.last_maintenance, ''),
+    costCenter: String(row?.cost_center || ''),
+  });
+
+  const normalizeVehicleInput = (vehicle: Partial<Vehicle>): Vehicle | null => {
+    const plate = normalizeVehiclePlate(vehicle.plate);
+    const model = String(vehicle.model || '').trim();
+
+    if (!plate || !model) return null;
+
+    return {
+      plate,
+      model,
+      type: String(vehicle.type || 'PROPRIO').trim() || 'PROPRIO',
+      status: normalizeVehicleStatus(vehicle.status),
+      costCenter: String(vehicle.costCenter || '').trim(),
+      lastMaintenance: toIsoDateTime(vehicle.lastMaintenance) || nowIso(),
+    };
+  };
+
   // Expanded Workshop Handlers
   const handleViewVehicle = (plate: string) => {
     const vehicle = vehicleDetails.find(v => v.plate === plate);
@@ -196,40 +252,45 @@ export const App: React.FC = () => {
   };
 
   // Vehicle Management Handlers
-  const handleAddVehicle = async (vehicleData: Omit<Vehicle, 'plate'>) => {
-    const plate = `VEH-${Date.now()}`;
-    const newVehicle: Vehicle = { ...vehicleData, plate };
-    const { error } = await api.from('vehicles').insert({
-      plate: newVehicle.plate,
-      model: newVehicle.model,
-      type: newVehicle.type,
-      status: newVehicle.status,
-      cost_center: newVehicle.costCenter,
-      last_maintenance: newVehicle.lastMaintenance
-    });
+  const handleAddVehicle = async (vehicleData: Vehicle) => {
+    const normalizedVehicle = normalizeVehicleInput(vehicleData);
+    if (!normalizedVehicle) {
+      showNotification('Preencha placa e modelo para cadastrar o veiculo.', 'error');
+      return;
+    }
+
+    const { data, error } = await api.from('vehicles').insert(toVehiclePayload(normalizedVehicle));
 
     if (!error) {
-      setVehicles(prev => [...prev, newVehicle]);
-      showNotification('Veículo cadastrado com sucesso!', 'success');
+      const persisted = data ? mapVehicleRowToState(data) : normalizedVehicle;
+      setVehicles((prev) => [persisted, ...prev.filter((item) => item.plate !== persisted.plate)]);
+      showNotification('Veiculo cadastrado com sucesso!', 'success');
     } else {
-      showNotification('Erro ao cadastrar veículo', 'error');
+      showNotification(error || 'Erro ao cadastrar veiculo', 'error');
     }
   };
 
   const handleUpdateVehicle = async (updatedVehicle: Vehicle) => {
-    const { error } = await api.from('vehicles').eq('plate', updatedVehicle.plate).update({
-      model: updatedVehicle.model,
-      type: updatedVehicle.type,
-      status: updatedVehicle.status,
-      cost_center: updatedVehicle.costCenter,
-      last_maintenance: updatedVehicle.lastMaintenance
+    const normalizedVehicle = normalizeVehicleInput(updatedVehicle);
+    if (!normalizedVehicle) {
+      showNotification('Dados de veiculo invalidos para atualizacao.', 'error');
+      return;
+    }
+
+    const { data, error } = await api.from('vehicles').eq('plate', normalizedVehicle.plate).update({
+      model: normalizedVehicle.model,
+      type: normalizedVehicle.type,
+      status: normalizedVehicle.status,
+      cost_center: normalizedVehicle.costCenter || null,
+      last_maintenance: toIsoDateTime(normalizedVehicle.lastMaintenance),
     });
 
     if (!error) {
-      setVehicles(prev => prev.map(v => v.plate === updatedVehicle.plate ? updatedVehicle : v));
-      showNotification('Veículo atualizado com sucesso!', 'success');
+      const persisted = Array.isArray(data) && data.length > 0 ? mapVehicleRowToState(data[0]) : normalizedVehicle;
+      setVehicles((prev) => prev.map((item) => (item.plate === normalizedVehicle.plate ? persisted : item)));
+      showNotification('Veiculo atualizado com sucesso!', 'success');
     } else {
-      showNotification('Erro ao atualizar veículo', 'error');
+      showNotification(error || 'Erro ao atualizar veiculo', 'error');
     }
   };
 
@@ -237,10 +298,98 @@ export const App: React.FC = () => {
     const { error } = await api.from('vehicles').eq('plate', plate).delete();
     if (!error) {
       setVehicles(prev => prev.filter(v => v.plate !== plate));
-      showNotification('Veículo removido com sucesso!', 'success');
+      showNotification('Veiculo removido com sucesso!', 'success');
     } else {
-      showNotification('Erro ao remover veículo', 'error');
+      showNotification('Erro ao remover veiculo', 'error');
     }
+  };
+
+  const handleImportVehicles = async (incomingVehicles: Vehicle[]) => {
+    if (!Array.isArray(incomingVehicles) || incomingVehicles.length === 0) {
+      showNotification('Nenhum veiculo valido para importar.', 'warning');
+      return;
+    }
+
+    const dedupedByPlate = new Map<string, Vehicle>();
+    let ignored = 0;
+
+    incomingVehicles.forEach((vehicle) => {
+      const normalized = normalizeVehicleInput(vehicle);
+      if (!normalized) {
+        ignored += 1;
+        return;
+      }
+      dedupedByPlate.set(normalized.plate, normalized);
+    });
+
+    const normalizedVehicles = Array.from(dedupedByPlate.values());
+    if (normalizedVehicles.length === 0) {
+      showNotification('Nenhum registro aproveitavel na planilha.', 'error');
+      return;
+    }
+
+    const { data: dbVehicles, error: listError } = await api.from('vehicles').select('plate');
+    if (listError) {
+      showNotification('Falha ao carregar frota atual para importar.', 'error');
+      return;
+    }
+
+    const existingPlates = new Set(
+      (dbVehicles || [])
+        .map((row: any) => normalizeVehiclePlate(row?.plate))
+        .filter(Boolean)
+    );
+
+    const toInsert: Vehicle[] = [];
+    const toUpdate: Vehicle[] = [];
+
+    normalizedVehicles.forEach((vehicle) => {
+      if (existingPlates.has(vehicle.plate)) {
+        toUpdate.push(vehicle);
+      } else {
+        toInsert.push(vehicle);
+      }
+    });
+
+    let inserted = 0;
+    let updated = 0;
+    let failed = 0;
+
+    if (toInsert.length > 0) {
+      const { data, error } = await api
+        .from('vehicles')
+        .insert(toInsert.map((vehicle) => toVehiclePayload(vehicle)));
+
+      if (error) {
+        failed += toInsert.length;
+      } else {
+        inserted = Array.isArray(data) ? data.length : toInsert.length;
+      }
+    }
+
+    for (const vehicle of toUpdate) {
+      const { error } = await api.from('vehicles').eq('plate', vehicle.plate).update({
+        model: vehicle.model,
+        type: vehicle.type,
+        status: vehicle.status,
+        cost_center: vehicle.costCenter || null,
+        last_maintenance: toIsoDateTime(vehicle.lastMaintenance),
+      });
+
+      if (error) {
+        failed += 1;
+      } else {
+        updated += 1;
+      }
+    }
+
+    const { data: refreshedVehicles } = await api.from('vehicles').select('*');
+    if (refreshedVehicles) {
+      setVehicles(refreshedVehicles.map((row: any) => mapVehicleRowToState(row)));
+    }
+
+    const summary = `Importacao concluida: ${inserted} novos, ${updated} atualizados${ignored > 0 ? `, ${ignored} ignorados` : ''}${failed > 0 ? `, ${failed} falharam` : ''}.`;
+    showNotification(summary, failed > 0 ? (inserted > 0 || updated > 0 ? 'warning' : 'error') : 'success');
   };
 
   // Integration: Request Parts from Workshop to Warehouse
@@ -300,22 +449,34 @@ export const App: React.FC = () => {
   const [movementsPage, setMovementsPage] = useState(1);
   const [purchaseOrdersPage, setPurchaseOrdersPage] = useState(1);
   const [materialRequestsPage, setMaterialRequestsPage] = useState(1);
+  const [masterDataItemsPage, setMasterDataItemsPage] = useState(1);
+  const [vendorsPage, setVendorsPage] = useState(1);
   const [pagedMovements, setPagedMovements] = useState<Movement[]>([]);
   const [pagedPurchaseOrders, setPagedPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [pagedMaterialRequests, setPagedMaterialRequests] = useState<MaterialRequest[]>([]);
+  const [pagedMasterDataItems, setPagedMasterDataItems] = useState<InventoryItem[]>([]);
+  const [pagedVendors, setPagedVendors] = useState<Vendor[]>([]);
   const [hasMoreMovements, setHasMoreMovements] = useState(false);
   const [hasMorePurchaseOrders, setHasMorePurchaseOrders] = useState(false);
   const [hasMoreMaterialRequests, setHasMoreMaterialRequests] = useState(false);
+  const [hasMoreMasterDataItems, setHasMoreMasterDataItems] = useState(false);
+  const [hasMoreVendors, setHasMoreVendors] = useState(false);
   const [isMovementsPageLoading, setIsMovementsPageLoading] = useState(false);
   const [isPurchaseOrdersPageLoading, setIsPurchaseOrdersPageLoading] = useState(false);
   const [isMaterialRequestsPageLoading, setIsMaterialRequestsPageLoading] = useState(false);
+  const [isMasterDataItemsPageLoading, setIsMasterDataItemsPageLoading] = useState(false);
+  const [masterDataItemsTotal, setMasterDataItemsTotal] = useState(0);
+  const [isVendorsPageLoading, setIsVendorsPageLoading] = useState(false);
+  const [vendorsTotal, setVendorsTotal] = useState(0);
 
   const fullLoadInFlight = useRef<Set<string>>(new Set());
   const loadBootstrapDataRef = useRef<((warehouseId?: string) => Promise<void>) | null>(null);
   const pageFetchSequence = useRef({
     movements: 0,
     purchaseOrders: 0,
-    materialRequests: 0
+    materialRequests: 0,
+    masterDataItems: 0,
+    vendors: 0
   });
 
   const INITIAL_INVENTORY_LIMIT = 100; // Reduzido de 500 para melhorar desempenho
@@ -325,6 +486,8 @@ export const App: React.FC = () => {
   const MOVEMENTS_PAGE_SIZE = 50; // Reduzido de 120
   const PURCHASE_ORDERS_PAGE_SIZE = 30; // Reduzido de 60
   const MATERIAL_REQUESTS_PAGE_SIZE = 30; // Reduzido de 60
+  const MASTER_DATA_ITEMS_PAGE_SIZE = 50;
+  const VENDORS_PAGE_SIZE = 50;
 
   const toPtBrDateTime = (value: unknown, fallback = ''): string => {
     const parsed = formatDateTimePtBR(value, fallback);
@@ -374,6 +537,29 @@ export const App: React.FC = () => {
         normalizedRole
       ),
     };
+  };
+
+  const buildUserModulesPayload = (
+    modules: Module[] | undefined,
+    hasWorkshopAccess: boolean | undefined,
+    role: User['role']
+  ): string[] => {
+    const cleaned = (Array.isArray(modules) ? modules.map((moduleId) => String(moduleId)) : [])
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .filter((token) => {
+        const normalized = token
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+        return normalized !== 'workshop' && normalized !== 'oficina';
+      });
+
+    if (role === 'admin' || hasWorkshopAccess) {
+      cleaned.push('workshop');
+    }
+
+    return [...new Set(cleaned)];
   };
 
   const generateUuid = () => {
@@ -485,6 +671,17 @@ export const App: React.FC = () => {
     safetyStock: item.safety_stock || 5,
     warehouseId: item.warehouse_id || 'ARMZ28'
   }));
+
+  const mapVendorRows = (rows: any[]): Vendor[] =>
+    rows.map((vendor: any) => ({
+      id: String(vendor?.id || ''),
+      name: String(vendor?.name || ''),
+      cnpj: String(vendor?.cnpj || ''),
+      category: String(vendor?.category || ''),
+      contact: String(vendor?.contact || ''),
+      email: String(vendor?.email || ''),
+      status: String(vendor?.status || 'Ativo').toLowerCase() === 'bloqueado' ? 'Bloqueado' : 'Ativo',
+    }));
 
   const loadInventoryForWarehouse = async (warehouseId: string, limit = INITIAL_INVENTORY_LIMIT) => {
     const safeLimit = Math.max(1, limit);
@@ -675,6 +872,87 @@ export const App: React.FC = () => {
     }
   };
 
+  const fetchMasterDataItemsPage = async (page: number) => {
+    if (!user) return;
+
+    const safePage = Math.max(1, page);
+    const requestId = ++pageFetchSequence.current.masterDataItems;
+    setIsMasterDataItemsPageLoading(true);
+
+    try {
+      const [countResponse, rowsResponse] = await Promise.all([
+        api.from('inventory/count').eq('warehouse_id', activeWarehouse).execute(),
+        api
+          .from('inventory')
+          .select('*')
+          .eq('warehouse_id', activeWarehouse)
+          .order('created_at', { ascending: false })
+          .limit(MASTER_DATA_ITEMS_PAGE_SIZE + 1)
+          .offset((safePage - 1) * MASTER_DATA_ITEMS_PAGE_SIZE),
+      ]);
+
+      if (requestId !== pageFetchSequence.current.masterDataItems) return;
+
+      const total = Number((countResponse as any)?.data?.total || 0);
+      setMasterDataItemsTotal(Number.isFinite(total) ? total : 0);
+
+      const rows = Array.isArray((rowsResponse as any)?.data) ? (rowsResponse as any).data : [];
+      const mapped = mapInventoryRows(rows);
+      setHasMoreMasterDataItems(mapped.length > MASTER_DATA_ITEMS_PAGE_SIZE);
+      setPagedMasterDataItems(mapped.slice(0, MASTER_DATA_ITEMS_PAGE_SIZE));
+    } catch (error) {
+      if (requestId !== pageFetchSequence.current.masterDataItems) return;
+      console.error('Erro ao carregar pagina do cadastro de itens:', error);
+      setMasterDataItemsTotal(0);
+      setHasMoreMasterDataItems(false);
+      setPagedMasterDataItems([]);
+    } finally {
+      if (requestId === pageFetchSequence.current.masterDataItems) {
+        setIsMasterDataItemsPageLoading(false);
+      }
+    }
+  };
+
+  const fetchVendorsPage = async (page: number) => {
+    if (!user) return;
+
+    const safePage = Math.max(1, page);
+    const requestId = ++pageFetchSequence.current.vendors;
+    setIsVendorsPageLoading(true);
+
+    try {
+      const [countResponse, rowsResponse] = await Promise.all([
+        api.from('vendors/count').execute(),
+        api
+          .from('vendors')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(VENDORS_PAGE_SIZE + 1)
+          .offset((safePage - 1) * VENDORS_PAGE_SIZE),
+      ]);
+
+      if (requestId !== pageFetchSequence.current.vendors) return;
+
+      const total = Number((countResponse as any)?.data?.total || 0);
+      setVendorsTotal(Number.isFinite(total) ? total : 0);
+
+      const rows = Array.isArray((rowsResponse as any)?.data) ? (rowsResponse as any).data : [];
+      const mapped = mapVendorRows(rows);
+      setHasMoreVendors(mapped.length > VENDORS_PAGE_SIZE);
+      setPagedVendors(mapped.slice(0, VENDORS_PAGE_SIZE));
+    } catch (error) {
+      if (requestId !== pageFetchSequence.current.vendors) return;
+      console.error('Erro ao carregar pagina do cadastro de fornecedores:', error);
+      setVendorsTotal(0);
+      setHasMoreVendors(false);
+      setPagedVendors([]);
+    } finally {
+      if (requestId === pageFetchSequence.current.vendors) {
+        setIsVendorsPageLoading(false);
+      }
+    }
+  };
+
   // Function to seed mock data for testing without backend
   const seedMockData = () => {
     console.log('=== SEEDING MOCK DATA ===');
@@ -804,17 +1082,10 @@ export const App: React.FC = () => {
         })));
 
         const { data: venData } = await api.from('vendors').select('*');
-        if (venData) setVendors(venData);
+        if (venData) setVendors(mapVendorRows(venData));
 
         const { data: vehData } = await api.from('vehicles').select('*');
-        if (vehData) setVehicles(vehData.map((v: any) => ({
-          plate: v.plate,
-          model: v.model,
-          type: v.type,
-          status: v.status,
-          lastMaintenance: v.last_maintenance,
-          costCenter: v.cost_center
-        })));
+        if (vehData) setVehicles(vehData.map((row: any) => mapVehicleRowToState(row)));
 
         const { data: userData } = await api.from('users').select('*');
         if (userData) {
@@ -936,6 +1207,18 @@ export const App: React.FC = () => {
   }, [activeModule, user, activeWarehouse, materialRequestsPage]);
 
   useEffect(() => {
+    if (activeModule !== 'cadastro') return;
+    if (!user) return;
+    void fetchMasterDataItemsPage(masterDataItemsPage);
+  }, [activeModule, user, activeWarehouse, masterDataItemsPage]);
+
+  useEffect(() => {
+    if (activeModule !== 'cadastro') return;
+    if (!user) return;
+    void fetchVendorsPage(vendorsPage);
+  }, [activeModule, user, vendorsPage]);
+
+  useEffect(() => {
     if (!user) return;
     if (inventoryWarehouseScope === activeWarehouse) return;
     void loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
@@ -947,17 +1230,27 @@ export const App: React.FC = () => {
     pageFetchSequence.current.movements += 1;
     pageFetchSequence.current.purchaseOrders += 1;
     pageFetchSequence.current.materialRequests += 1;
+    pageFetchSequence.current.masterDataItems += 1;
+    pageFetchSequence.current.vendors += 1;
 
     setMovementsPage(1);
     setPurchaseOrdersPage(1);
     setMaterialRequestsPage(1);
+    setMasterDataItemsPage(1);
+    setVendorsPage(1);
 
     setPagedMovements([]);
     setPagedPurchaseOrders([]);
     setPagedMaterialRequests([]);
+    setPagedMasterDataItems([]);
+    setPagedVendors([]);
     setHasMoreMovements(false);
     setHasMorePurchaseOrders(false);
     setHasMoreMaterialRequests(false);
+    setHasMoreMasterDataItems(false);
+    setHasMoreVendors(false);
+    setMasterDataItemsTotal(0);
+    setVendorsTotal(0);
   }, [activeWarehouse, user]);
 
   // Auto-logout after 10 minutes of inactivity
@@ -988,6 +1281,7 @@ export const App: React.FC = () => {
   }, [user]);
 
   const handleAddUser = async (newUser: User) => {
+    const modulesPayload = buildUserModulesPayload(newUser.modules, newUser.hasWorkshopAccess, newUser.role);
     const { error } = await api.from('users').insert({
       id: newUser.id,
       name: newUser.name,
@@ -997,12 +1291,13 @@ export const App: React.FC = () => {
       last_access: toIsoDateTime(newUser.lastAccess),
       avatar: newUser.avatar,
       password: newUser.password,
-      modules: newUser.modules,
+      modules: modulesPayload,
       allowed_warehouses: newUser.allowedWarehouses
     });
 
     if (!error) {
-      setUsers(prev => [...prev, newUser]);
+      const persistedUser = normalizeUserSession({ ...newUser, modules: modulesPayload });
+      setUsers(prev => [...prev, persistedUser]);
       addActivity('alerta', 'Novo Usuário', `Usuário ${newUser.name} cadastrado`);
       showNotification(`Usuário ${newUser.name} cadastrado com sucesso!`, 'success');
     } else {
@@ -1011,6 +1306,11 @@ export const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
+    const modulesPayload = buildUserModulesPayload(
+      updatedUser.modules,
+      updatedUser.hasWorkshopAccess,
+      updatedUser.role
+    );
     const { error } = await api.from('users').eq('id', updatedUser.id).update({
       name: updatedUser.name,
       email: updatedUser.email,
@@ -1018,12 +1318,22 @@ export const App: React.FC = () => {
       status: updatedUser.status,
       avatar: updatedUser.avatar,
       password: updatedUser.password,
-      modules: updatedUser.modules,
+      modules: modulesPayload,
       allowed_warehouses: updatedUser.allowedWarehouses
     });
 
     if (!error) {
-      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      const persistedUser = normalizeUserSession({ ...updatedUser, modules: modulesPayload });
+      setUsers(prev => prev.map(u => u.id === updatedUser.id ? persistedUser : u));
+      if (user?.id === persistedUser.id) {
+        setUser(persistedUser);
+        localStorage.setItem('logged_user', JSON.stringify(persistedUser));
+        if (currentSystemModule === 'workshop' && persistedUser.role !== 'admin' && !persistedUser.hasWorkshopAccess) {
+          setCurrentSystemModule(null);
+          showNotification('Acesso à Oficina removido para este usuário.', 'warning');
+          return;
+        }
+      }
       showNotification('Usuário atualizado com sucesso!', 'success');
     } else {
       showNotification('Erro ao atualizar usuário', 'error');
@@ -1098,9 +1408,17 @@ export const App: React.FC = () => {
     }
   };
 
-  const recordMovement = async (type: Movement['type'], item: InventoryItem, quantity: number, reason: string, orderId?: string) => {
+  const recordMovement = async (
+    type: Movement['type'],
+    item: InventoryItem,
+    quantity: number,
+    reason: string,
+    orderId?: string,
+    warehouseId?: string
+  ) => {
     const movementTimestampIso = nowIso();
     const movementId = generateUuid();
+    const movementWarehouseId = warehouseId || item.warehouseId || activeWarehouse;
     const newMovement: Movement = {
       id: movementId,
       timestamp: toPtBrDateTime(movementTimestampIso, formatDateTimePtBR(new Date(), '')),
@@ -1112,7 +1430,7 @@ export const App: React.FC = () => {
       location: item.location,
       reason: reason,
       orderId: orderId,
-      warehouseId: activeWarehouse // NOVO
+      warehouseId: movementWarehouseId // NOVO
     };
 
     const { error } = await api.from('movements').insert({
@@ -1126,12 +1444,12 @@ export const App: React.FC = () => {
       location: newMovement.location,
       reason: newMovement.reason,
       order_id: newMovement.orderId,
-      warehouse_id: newMovement.warehouseId
+      warehouse_id: movementWarehouseId
     });
 
     if (!error) {
       setMovements(prev => [newMovement, ...prev]);
-      if (newMovement.warehouseId === activeWarehouse && movementsPage === 1) {
+      if (movementWarehouseId === activeWarehouse && movementsPage === 1) {
         setPagedMovements(prev => [newMovement, ...prev].slice(0, MOVEMENTS_PAGE_SIZE));
       }
     } else {
@@ -1282,6 +1600,35 @@ export const App: React.FC = () => {
       );
       showNotification(`Pedido ${id} rejeitado. Refaça as cotações.`, 'warning');
     }
+  };
+
+  const handleDeletePO = async (id: string) => {
+    if (!user || user.role !== 'admin') {
+      showNotification('Somente administrador pode remover pedidos de compra.', 'error');
+      return;
+    }
+
+    const order = purchaseOrders.find((po) => po.id === id);
+    if (!order) {
+      showNotification('Pedido não encontrado.', 'error');
+      return;
+    }
+
+    if (order.status === 'recebido') {
+      showNotification('Não é permitido remover pedido já recebido.', 'warning');
+      return;
+    }
+
+    const { error } = await api.from('purchase_orders').eq('id', id).delete();
+    if (error) {
+      showNotification('Erro ao remover pedido de compra.', 'error');
+      return;
+    }
+
+    setPurchaseOrders((prev) => prev.filter((po) => po.id !== id));
+    setPagedPurchaseOrders((prev) => prev.filter((po) => po.id !== id));
+    addActivity('compra', 'Pedido Removido', `Pedido ${id} removido por ${user.name}`);
+    showNotification(`Pedido ${id} removido com sucesso.`, 'success');
   };
 
   const handleRecalculateROP = async () => {
@@ -2249,7 +2596,10 @@ export const App: React.FC = () => {
           safety_stock: data.safetyStock || 5
         });
         if (!error) {
-          setInventory(prev => prev.map(i => i.sku === data.sku ? { ...i, ...data } : i));
+          await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+          if (activeModule === 'cadastro') {
+            await fetchMasterDataItemsPage(masterDataItemsPage);
+          }
           showNotification('Item atualizado com sucesso', 'success');
         } else {
           showNotification(`Erro ao atualizar item: ${error.message}`, 'error');
@@ -2274,7 +2624,11 @@ export const App: React.FC = () => {
         if (!error && insertedRow) {
           const mappedInserted = mapInventoryRows([insertedRow])[0];
           if (mappedInserted) {
-            setInventory(prev => [...prev, mappedInserted]);
+            await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+            if (activeModule === 'cadastro') {
+              setMasterDataItemsPage(1);
+              await fetchMasterDataItemsPage(1);
+            }
             await recordMovement('entrada', mappedInserted, 0, 'Criação de novo Código de Produto');
             showNotification('Item criado com sucesso', 'success');
           } else {
@@ -2286,18 +2640,43 @@ export const App: React.FC = () => {
       }
     } else if (type === 'vendor') {
       if (isEdit) {
-        const { error } = await api.from('vendors').eq('id', data.id).update(data);
+        const vendorPayload = {
+          name: String(data?.name || ''),
+          cnpj: String(data?.cnpj || ''),
+          category: String(data?.category || ''),
+          contact: String(data?.contact || ''),
+          email: String(data?.email || ''),
+          status: String(data?.status || 'Ativo').toLowerCase() === 'bloqueado' ? 'Bloqueado' : 'Ativo',
+        };
+        const { error } = await api.from('vendors').eq('id', data.id).update(vendorPayload);
         if (!error) {
-          setVendors(prev => prev.map(v => v.id === data.id ? { ...v, ...data } : v));
+          setVendors(prev => prev.map(v => (v.id === data.id ? { ...v, ...vendorPayload } : v)));
+          if (activeModule === 'cadastro') {
+            await fetchVendorsPage(vendorsPage);
+          }
           showNotification('Fornecedor atualizado com sucesso', 'success');
         } else {
           showNotification(`Erro ao atualizar fornecedor: ${error.message}`, 'error');
         }
       } else {
-        const newVendor: Vendor = { ...data, id: Date.now().toString(), status: 'Ativo' };
-        const { error } = await api.from('vendors').insert(newVendor);
+        const newVendor: Vendor = {
+          id: String(data?.id || Date.now().toString()),
+          name: String(data?.name || ''),
+          cnpj: String(data?.cnpj || ''),
+          category: String(data?.category || ''),
+          contact: String(data?.contact || ''),
+          email: String(data?.email || ''),
+          status: String(data?.status || 'Ativo').toLowerCase() === 'bloqueado' ? 'Bloqueado' : 'Ativo',
+        };
+        const { data: insertedData, error } = await api.from('vendors').insert(newVendor);
         if (!error) {
-          setVendors(prev => [...prev, newVendor]);
+          const insertedRow = Array.isArray(insertedData) ? insertedData[0] : insertedData;
+          const mappedInserted = insertedRow ? mapVendorRows([insertedRow])[0] : newVendor;
+          setVendors(prev => [mappedInserted, ...prev.filter((vendor) => vendor.id !== mappedInserted.id)]);
+          if (activeModule === 'cadastro') {
+            setVendorsPage(1);
+            await fetchVendorsPage(1);
+          }
           showNotification('Fornecedor cadastrado com sucesso', 'success');
         } else {
           showNotification(`Erro ao cadastrar fornecedor: ${error.message}`, 'error');
@@ -2359,7 +2738,15 @@ export const App: React.FC = () => {
       }));
     } else if (type === 'vendor') {
       table = 'vendors';
-      processedData = data.map(d => ({ id: d.id, name: String(d.name || ''), cnpj: String(d.cnpj || ''), contact: String(d.contact || ''), status: d.status || 'Ativo' }));
+      processedData = data.map((d, index) => ({
+        id: String(d.id || `${Date.now()}-${index}`),
+        name: String(d.name || ''),
+        cnpj: String(d.cnpj || ''),
+        category: String(d.category || ''),
+        contact: String(d.contact || ''),
+        email: String(d.email || ''),
+        status: String(d.status || 'Ativo').toLowerCase() === 'bloqueado' ? 'Bloqueado' : 'Ativo'
+      }));
     } else if (type === 'vehicle') {
       table = 'vehicles';
       processedData = data.map(d => ({
@@ -2377,8 +2764,19 @@ export const App: React.FC = () => {
     if (!error) {
       if (type === 'item' && insertedData) {
         await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+        if (activeModule === 'cadastro') {
+          setMasterDataItemsPage(1);
+          await fetchMasterDataItemsPage(1);
+        }
       } else if (type === 'vendor') {
-        setVendors(prev => [...prev, ...data]);
+        const normalizedInserted = Array.isArray(insertedData) ? mapVendorRows(insertedData) : [];
+        if (normalizedInserted.length > 0) {
+          setVendors(prev => [...normalizedInserted, ...prev.filter((vendor) => !normalizedInserted.some((added) => added.id === vendor.id))]);
+        }
+        if (activeModule === 'cadastro') {
+          setVendorsPage(1);
+          await fetchVendorsPage(1);
+        }
       } else if (type === 'vehicle') {
         setVehicles(prev => [...prev, ...data]);
       }
@@ -2467,8 +2865,26 @@ export const App: React.FC = () => {
 
     const { error } = await api.from(table).eq(matchKey, id).delete();
     if (!error) {
-      if (type === 'item') setInventory(prev => prev.filter(x => x.sku !== id));
-      if (type === 'vendor') setVendors(prev => prev.filter(x => x.id !== id));
+      if (type === 'item') {
+        const targetPage = pagedMasterDataItems.length === 1 && masterDataItemsPage > 1
+          ? masterDataItemsPage - 1
+          : masterDataItemsPage;
+        await loadInventoryForWarehouse(activeWarehouse, INITIAL_INVENTORY_LIMIT);
+        if (activeModule === 'cadastro') {
+          setMasterDataItemsPage(targetPage);
+          await fetchMasterDataItemsPage(targetPage);
+        }
+      }
+      if (type === 'vendor') {
+        setVendors(prev => prev.filter(x => x.id !== id));
+        const targetPage = pagedVendors.length === 1 && vendorsPage > 1
+          ? vendorsPage - 1
+          : vendorsPage;
+        if (activeModule === 'cadastro') {
+          setVendorsPage(targetPage);
+          await fetchVendorsPage(targetPage);
+        }
+      }
       if (type === 'vehicle') setVehicles(prev => prev.filter(x => x.plate !== id));
       showNotification('Registro removido', 'success');
     }
@@ -2588,6 +3004,7 @@ export const App: React.FC = () => {
     pageFetchSequence.current.movements += 1;
     pageFetchSequence.current.purchaseOrders += 1;
     pageFetchSequence.current.materialRequests += 1;
+    pageFetchSequence.current.masterDataItems += 1;
     setPurchaseOrders([]);
     setMovements([]);
     setMaterialRequests([]);
@@ -2598,15 +3015,25 @@ export const App: React.FC = () => {
     setPagedPurchaseOrders([]);
     setPagedMovements([]);
     setPagedMaterialRequests([]);
+    setPagedMasterDataItems([]);
+    setPagedVendors([]);
     setHasMorePurchaseOrders(false);
     setHasMoreMovements(false);
     setHasMoreMaterialRequests(false);
+    setHasMoreMasterDataItems(false);
+    setHasMoreVendors(false);
     setIsPurchaseOrdersPageLoading(false);
     setIsMovementsPageLoading(false);
     setIsMaterialRequestsPageLoading(false);
+    setIsMasterDataItemsPageLoading(false);
+    setIsVendorsPageLoading(false);
     setPurchaseOrdersPage(1);
     setMovementsPage(1);
     setMaterialRequestsPage(1);
+    setMasterDataItemsPage(1);
+    setVendorsPage(1);
+    setMasterDataItemsTotal(0);
+    setVendorsTotal(0);
     fullLoadInFlight.current.clear();
     setUser(null);
     setCurrentSystemModule(null);
@@ -2618,11 +3045,13 @@ export const App: React.FC = () => {
     sku: string,
     qty: number,
     reason = 'Saída para Expedição',
-    orderId?: string
+    orderId?: string,
+    warehouseId?: string
   ) => {
-    const item = inventory.find(i => i.sku === sku);
+    const targetWarehouseId = warehouseId || activeWarehouse;
+    const item = inventory.find(i => i.sku === sku && i.warehouseId === targetWarehouseId);
     if (!item) {
-      showNotification(`Item ${sku} não encontrado no inventário.`, 'error');
+      showNotification(`Item ${sku} não encontrado no inventário do armazém ${targetWarehouseId}.`, 'error');
       return false;
     }
 
@@ -2635,12 +3064,12 @@ export const App: React.FC = () => {
     const { error } = await api
       .from('inventory')
       .eq('sku', sku)
-      .eq('warehouse_id', activeWarehouse)
+      .eq('warehouse_id', targetWarehouseId)
       .update({ quantity: newQuantity });
 
     if (!error) {
-      setInventory(prev => prev.map(i => i.sku === sku ? { ...i, quantity: newQuantity } : i));
-      await recordMovement('saida', item, qty, reason, orderId);
+      setInventory(prev => prev.map(i => (i.sku === sku && i.warehouseId === targetWarehouseId) ? { ...i, quantity: newQuantity } : i));
+      await recordMovement('saida', item, qty, reason, orderId, targetWarehouseId);
       showNotification(`Estoque de ${sku} atualizado para ${newQuantity}.`, 'success');
       return true;
     } else {
@@ -2706,6 +3135,14 @@ export const App: React.FC = () => {
 
   const handleRequestUpdate = async (id: string, status: RequestStatus) => {
     const currentRequest = materialRequests.find(request => request.id === id);
+
+    const isApprovalStep =
+      currentRequest?.status === 'aprovacao' && status === 'separacao';
+    if (isApprovalStep && user?.role !== 'admin') {
+      showNotification('Apenas administrador pode aprovar solicitações SA.', 'error');
+      return;
+    }
+
     const { error } = await api.from('material_requests').update({ status }).eq('id', id);
     if (error) {
       showNotification('Erro ao atualizar status', 'error');
@@ -2743,6 +3180,17 @@ export const App: React.FC = () => {
   };
 
   const handleRequestEdit = async (id: string, data: Partial<MaterialRequest>) => {
+    const currentRequest = materialRequests.find((request) => request.id === id);
+    const isApprovalTransitionByEdit =
+      currentRequest?.status === 'aprovacao' &&
+      data.status === 'separacao' &&
+      user?.role !== 'admin';
+
+    if (isApprovalTransitionByEdit) {
+      showNotification('Apenas administrador pode aprovar solicitações SA.', 'error');
+      throw new Error('Aprovação bloqueada para usuário não administrador.');
+    }
+
     const { error } = await api.from('material_requests').update({
       sku: data.sku,
       name: data.name,
@@ -2779,6 +3227,11 @@ export const App: React.FC = () => {
 
   // Workshop Handlers
   const handleSelectSystemModule = async (module: SystemModule) => {
+    if (module === 'workshop' && user && user.role !== 'admin' && !user.hasWorkshopAccess) {
+      showNotification('Acesso à Oficina bloqueado para este usuário.', 'error');
+      return;
+    }
+
     setCurrentSystemModule(module);
     setIsLoading(true);
     
@@ -3004,14 +3457,7 @@ export const App: React.FC = () => {
       // Carregar veículos do banco ou usar seed
       const { data: vehData } = await api.from('vehicles').select('*');
       if (vehData && vehData.length > 0) {
-        setVehicles(vehData.map((v: any) => ({
-          plate: v.plate,
-          model: v.model,
-          type: v.type,
-          status: v.status,
-          lastMaintenance: v.last_maintenance,
-          costCenter: v.cost_center
-        })));
+        setVehicles(vehData.map((row: any) => mapVehicleRowToState(row)));
       } else {
         setVehicles(seedVehicles);
       }
@@ -3286,6 +3732,7 @@ export const App: React.FC = () => {
                     inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
                     vehicles={vehicles}
                     requests={pagedMaterialRequests}
+                    canApproveRequests={user?.role === 'admin'}
                     onProcessPicking={handleUpdateInventoryQuantity}
                     onRequestCreate={handleRequestCreate}
                     onRequestUpdate={handleRequestUpdate}
@@ -3324,6 +3771,7 @@ export const App: React.FC = () => {
                     onMarkAsSent={handleMarkAsSent}
                     onApprove={handleApprovePO}
                     onReject={handleRejectPO}
+                    onDeleteOrder={handleDeletePO}
                     currentPage={purchaseOrdersPage}
                     pageSize={PURCHASE_ORDERS_PAGE_SIZE}
                     hasNextPage={hasMorePurchaseOrders}
@@ -3333,11 +3781,27 @@ export const App: React.FC = () => {
                 )}
                 {activeModule === 'cadastro' && (
                   <MasterData
-                    inventory={inventory.filter(i => i.warehouseId === activeWarehouse)}
-                    vendors={vendors}
+                    inventory={pagedMasterDataItems}
+                    vendors={pagedVendors}
                     onAddRecord={handleAddMasterRecord}
                     onRemoveRecord={handleRemoveMasterRecord}
                     onImportRecords={handleImportMasterRecords}
+                    inventoryPagination={{
+                      currentPage: masterDataItemsPage,
+                      pageSize: MASTER_DATA_ITEMS_PAGE_SIZE,
+                      totalItems: masterDataItemsTotal,
+                      hasNextPage: hasMoreMasterDataItems,
+                      isLoading: isMasterDataItemsPageLoading,
+                      onPageChange: setMasterDataItemsPage,
+                    }}
+                    vendorsPagination={{
+                      currentPage: vendorsPage,
+                      pageSize: VENDORS_PAGE_SIZE,
+                      totalItems: vendorsTotal,
+                      hasNextPage: hasMoreVendors,
+                      isLoading: isVendorsPageLoading,
+                      onPageChange: setVendorsPage,
+                    }}
                   />
                 )}
                 {activeModule === 'relatorios' && (
@@ -3557,6 +4021,7 @@ export const App: React.FC = () => {
                   onDeleteVehicle={handleDeleteVehicle}
                   onSyncFleetAPI={handleSyncFleetAPI}
                   onRequestParts={handleRequestPartsFromWorkshop}
+                  onImportVehicles={handleImportVehicles}
                 />
               )}
             </Suspense>

@@ -257,8 +257,9 @@ export const WorkshopDashboard: React.FC<WorkshopDashboardProps> = ({
 
           <div className="space-y-4">
             {Object.entries(stats.typeCounts).map(([type, count]) => {
-              const total = Object.values(stats.typeCounts).reduce((a, b) => a + b, 0);
-              const percentage = total > 0 ? (count / total) * 100 : 0;
+              const total = (Object.values(stats.typeCounts) as number[]).reduce((a, b) => a + b, 0);
+              const countValue = Number(count || 0);
+              const percentage = total > 0 ? (countValue / total) * 100 : 0;
               
               const colors = {
                 preventiva: 'bg-blue-500',
@@ -283,7 +284,7 @@ export const WorkshopDashboard: React.FC<WorkshopDashboardProps> = ({
                   </div>
                   <div className="w-16 text-right">
                     <span className="text-sm font-bold text-slate-900 dark:text-white">
-                      {count}
+                      {countValue}
                     </span>
                     <span className="text-xs text-slate-500 dark:text-slate-400 ml-1">
                       ({percentage.toFixed(0)}%)

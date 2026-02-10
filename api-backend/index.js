@@ -315,11 +315,13 @@ const parseDateFilter = (dateValue) => {
 };
 
 const includesText = (source, term) => String(source || '').toLowerCase().includes(String(term || '').toLowerCase());
+const normalizePlateToken = (value) => String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
 
 const filterAuditLogRows = (rows, filters) => {
   const fromIso = filters.from ? parseDateFilter(filters.from) : null;
   const toIso = filters.to ? parseDateFilter(filters.to) : null;
   const searchTerm = String(filters.q || '').trim().toLowerCase();
+  const plateTerm = normalizePlateToken(filters.plate || '');
   const warehouseFilter = String(filters.warehouse_id || '').trim();
   const includeGlobal = String(filters.include_global || 'true').toLowerCase() !== 'false';
 
@@ -358,6 +360,19 @@ const filterAuditLogRows = (rows, filters) => {
         .toLowerCase();
 
       if (!haystack.includes(searchTerm)) return false;
+    }
+
+    if (plateTerm) {
+      const plateHaystack = normalizePlateToken([
+        row?.meta?.plate,
+        row?.before_data?.plate,
+        row?.after_data?.plate,
+        JSON.stringify(row.meta || {}),
+        JSON.stringify(row.before_data || {}),
+        JSON.stringify(row.after_data || {}),
+      ].join(' '));
+
+      if (!plateHaystack.includes(plateTerm)) return false;
     }
 
     return true;
@@ -1220,6 +1235,7 @@ app.get('/audit_logs/search', authenticate, async (req, res) => {
     entity: String(toScalar(req.query.entity) || '').trim(),
     action: String(toScalar(req.query.action) || '').trim(),
     actor: String(toScalar(req.query.actor) || '').trim(),
+    plate: String(toScalar(req.query.plate) || '').trim(),
     warehouse_id: String(toScalar(req.query.warehouse_id) || '').trim(),
     include_global: String(toScalar(req.query.include_global) || 'true').trim(),
     q: String(toScalar(req.query.q) || '').trim(),
@@ -1328,6 +1344,24 @@ app.get('/audit_logs/search', authenticate, async (req, res) => {
       )`);
     }
 
+    if (filters.plate) {
+      const normalizedPlate = normalizePlateToken(filters.plate);
+      const marker = pushValue(`%${normalizedPlate}%`);
+      whereParts.push(`regexp_replace(
+        lower(
+          concat_ws(' ',
+            COALESCE(CAST(meta AS TEXT), ''),
+            COALESCE(CAST(before_data AS TEXT), ''),
+            COALESCE(CAST(after_data AS TEXT), ''),
+            COALESCE(entity_id, '')
+          )
+        ),
+        '[^a-z0-9]',
+        '',
+        'g'
+      ) LIKE ${marker}`);
+    }
+
     const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
 
     const jsonFallbackRows = getJsonFallbackRows();
@@ -1399,6 +1433,50 @@ app.get('/audit_logs/search', authenticate, async (req, res) => {
       ...buildAuditResponse(getJsonFallbackRows()),
       source: 'json-fallback',
     });
+  }
+});
+
+app.get('/:table/count', authenticate, async (req, res) => {
+  const { table } = req.params;
+
+  if (!validateTable(table)) {
+    res.status(403).json({ data: null, error: 'Tabela nao permitida' });
+    return;
+  }
+
+  const filters = getFiltersFromQuery(req.query);
+  if (!areColumnsAllowed(table, Object.keys(filters))) {
+    res.status(400).json({ data: null, error: 'Filtro com coluna nao permitida' });
+    return;
+  }
+
+  if (!dbConnected) {
+    let rows = normalizeRowsByTable(table, readJson(table));
+    rows = applyFiltersToJsonRows(rows, filters);
+    res.json({ data: { total: rows.length }, error: null });
+    return;
+  }
+
+  try {
+    let query = `SELECT COUNT(*)::int AS total FROM ${table}`;
+    const values = [];
+
+    const filterEntries = Object.entries(filters);
+    if (filterEntries.length > 0) {
+      const whereClause = filterEntries
+        .map(([column], index) => `${column} = $${index + 1}`)
+        .join(' AND ');
+
+      query += ` WHERE ${whereClause}`;
+      values.push(...filterEntries.map(([, value]) => coerceValue(value)));
+    }
+
+    const result = await pool.query(query, values);
+    const total = Number(result.rows?.[0]?.total || 0);
+    res.json({ data: { total }, error: null });
+  } catch (err) {
+    markDbDisconnectedIfNeeded(err);
+    sendServerError(res, err);
   }
 });
 

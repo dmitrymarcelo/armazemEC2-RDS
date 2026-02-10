@@ -28,6 +28,7 @@ interface AuditFilters {
   entity: string;
   action: string;
   actor: string;
+  plate: string;
   warehouse_id: string;
   include_global: boolean;
   from: string;
@@ -75,6 +76,7 @@ const createInitialFilters = (warehouseId: string): AuditFilters => ({
   entity: '',
   action: '',
   actor: '',
+  plate: '',
   warehouse_id: 'all',
   include_global: true,
   from: '',
@@ -132,6 +134,7 @@ const toInputDate = (value: string) => {
 };
 
 const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizePlateToken = (value: unknown) => String(value || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
 const parseDateMs = (value: unknown) => {
   const parsed = new Date(String(value || '')).getTime();
@@ -165,6 +168,7 @@ const applyAuditFiltersLocally = (rows: AuditLogEntry[], filters: AuditFilters):
   const entityTerm = normalizeText(filters.entity);
   const actionTerm = normalizeText(filters.action);
   const actorTerm = normalizeText(filters.actor);
+  const plateTerm = normalizePlateToken(filters.plate);
   const warehouseTerm = normalizeText(filters.warehouse_id);
   const fromInput = filters.from && !filters.from.includes('T') ? `${filters.from}T00:00:00.000` : filters.from;
   const toInput = filters.to && !filters.to.includes('T') ? `${filters.to}T23:59:59.999` : filters.to;
@@ -182,6 +186,18 @@ const applyAuditFiltersLocally = (rows: AuditLogEntry[], filters: AuditFilters):
     if (entityTerm && !rowEntity.includes(entityTerm)) return false;
     if (actionTerm && !rowAction.includes(actionTerm)) return false;
     if (actorTerm && !rowActor.includes(actorTerm)) return false;
+
+    if (plateTerm) {
+      const plateHaystack = normalizePlateToken([
+        (row?.meta as any)?.plate,
+        (row?.before_data as any)?.plate,
+        (row?.after_data as any)?.plate,
+        JSON.stringify(row?.meta || {}),
+        JSON.stringify(row?.before_data || {}),
+        JSON.stringify(row?.after_data || {}),
+      ].join(' '));
+      if (!plateHaystack.includes(plateTerm)) return false;
+    }
 
     if (warehouseTerm && warehouseTerm !== 'all') {
       const warehouseMatches = rowWarehouse === filters.warehouse_id;
@@ -272,6 +288,7 @@ export const GeneralAudit: React.FC<GeneralAuditProps> = ({ activeWarehouse }) =
         if (filters.entity.trim()) query = query.eq('entity', filters.entity.trim());
         if (filters.action) query = query.eq('action', filters.action);
         if (filters.actor.trim()) query = query.eq('actor', filters.actor.trim());
+        if (filters.plate.trim()) query = query.eq('plate', filters.plate.trim());
         if (filters.warehouse_id) query = query.eq('warehouse_id', filters.warehouse_id);
         query = query.eq('include_global', filters.include_global ? 'true' : 'false');
 
@@ -365,6 +382,7 @@ export const GeneralAudit: React.FC<GeneralAuditProps> = ({ activeWarehouse }) =
       q: draftFilters.q.trim(),
       entity: draftFilters.entity.trim(),
       actor: draftFilters.actor.trim(),
+      plate: draftFilters.plate.trim(),
     });
   };
 
@@ -505,6 +523,13 @@ export const GeneralAudit: React.FC<GeneralAuditProps> = ({ activeWarehouse }) =
             value={draftFilters.actor}
             onChange={(e) => setDraftFilters((prev) => ({ ...prev, actor: e.target.value }))}
             placeholder="Usuário (email ou nome)"
+            className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:outline-none focus:border-primary"
+          />
+
+          <input
+            value={draftFilters.plate}
+            onChange={(e) => setDraftFilters((prev) => ({ ...prev, plate: e.target.value }))}
+            placeholder="Placa (ex: ABC-1234)"
             className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:outline-none focus:border-primary"
           />
 
