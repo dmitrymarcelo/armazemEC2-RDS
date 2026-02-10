@@ -25,9 +25,20 @@ fi
 
 echo "[1/7] Atualizando codigo"
 cd "$PROJECT_DIR"
+
+# Preserva configuracao local de ambiente do backend durante o pull.
+ENV_BACKUP="/tmp/logiwms-api-env.backup"
+if [[ -f "$API_DIR/.env" ]]; then
+  cp "$API_DIR/.env" "$ENV_BACKUP"
+fi
+
 git fetch --all --prune
 git checkout "$BRANCH"
 git pull origin "$BRANCH"
+
+if [[ -f "$ENV_BACKUP" ]]; then
+  cp "$ENV_BACKUP" "$API_DIR/.env"
+fi
 
 echo "[2/7] Instalando dependencias"
 npm ci
